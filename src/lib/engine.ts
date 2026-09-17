@@ -61,6 +61,7 @@ export class WhaleEngine {
   private liveFeed = false;
   private error: string | null = null;
   private started = false;
+  private startPromise: Promise<void> | null = null;
   private ws: WebSocket | null = null;
   private timers: NodeJS.Timeout[] = [];
   private pending = new Set<string>();
@@ -73,9 +74,12 @@ export class WhaleEngine {
   }
 
   snapshot(): EngineSnapshot {
-    const signals = [...this.signals.values()].sort(
-      (a, b) => b.timestampUnix - a.timestampUnix
-    );
+    const rank = (signal: WhaleSignal) => (signal.signal === "WATCH" ? 1 : 0);
+    const signals = [...this.signals.values()].sort((a, b) => {
+      const bySide = rank(a) - rank(b);
+      if (bySide !== 0) return bySide;
+      return b.timestampUnix - a.timestampUnix;
+    });
     return {
       ok: this.error === null,
       error: this.error,
@@ -97,6 +101,12 @@ export class WhaleEngine {
   }
 
   async start() {
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.boot();
+    return this.startPromise;
+  }
+
+  private async boot() {
     if (this.started) return;
     this.started = true;
     this.log(
@@ -104,7 +114,7 @@ export class WhaleEngine {
     );
     await this.refreshPrice();
     this.connectLiveFeed();
-    void this.scan("startup");
+    await this.scan("startup");
     this.timers.push(
       setInterval(() => {
         void this.refreshPrice();
@@ -403,8 +413,5 @@ export function getEngine() {
 export async function getSnapshot() {
   const engine = getEngine();
   await engine.start();
-  if (!engine.snapshot().lastScanAt) {
-    await engine.scan("first-request");
-  }
   return engine.snapshot();
 }

@@ -186,7 +186,16 @@ export function Dashboard() {
             <h2 className="text-lg font-medium">Whale alerts</h2>
             <Tabs
               value={filter}
-              onValueChange={(value) => setFilter(value as Filter)}
+              onValueChange={(value) => {
+                if (
+                  value === "ALL" ||
+                  value === "BUY" ||
+                  value === "SELL" ||
+                  value === "WATCH"
+                ) {
+                  setFilter(value);
+                }
+              }}
             >
               <TabsList>
                 <TabsTrigger value="ALL">Lahat</TabsTrigger>
