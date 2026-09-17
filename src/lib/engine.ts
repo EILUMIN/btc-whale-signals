@@ -113,18 +113,21 @@ export class WhaleEngine {
       `Whale engine up. Threshold ${this.thresholdBtc} BTC. Watching ${TRACKED_EXCHANGE_ADDRESSES.length} exchange clusters.`
     );
     await this.refreshPrice();
-    this.connectLiveFeed();
     await this.scan("startup");
-    this.timers.push(
-      setInterval(() => {
-        void this.refreshPrice();
-      }, PRICE_INTERVAL_MS)
-    );
-    this.timers.push(
-      setInterval(() => {
-        void this.scan("interval");
-      }, SCAN_INTERVAL_MS)
-    );
+    // Vercel serverless cannot keep a websocket or interval alive between requests.
+    if (!process.env.VERCEL) {
+      this.connectLiveFeed();
+      this.timers.push(
+        setInterval(() => {
+          void this.refreshPrice();
+        }, PRICE_INTERVAL_MS)
+      );
+      this.timers.push(
+        setInterval(() => {
+          void this.scan("interval");
+        }, SCAN_INTERVAL_MS)
+      );
+    }
   }
 
   async refreshPrice() {

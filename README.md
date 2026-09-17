@@ -32,6 +32,10 @@ npm run dev
 
 Buksan ang dashboard sa [http://127.0.0.1:43127](http://127.0.0.1:43127).
 
+### Sa smartphone
+
+Ang `127.0.0.1` at Cursor preview URL (`*.agent.cvm.dev`) ay hindi magbubukas sa phone. I-deploy sa Vercel (Publish sa Cursor) para makakuha ng `https://…vercel.app` link, tapos i-bookmark o Add to Home Screen.
+
 Terminal-only monitor (parehong engine, naka-print sa console):
 
 ```bash

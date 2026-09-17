@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -15,7 +15,21 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Whale Signal Desk · BTC/USD",
   description:
-    "Local BTC whale tracker: Mempool.space large transactions, Binance price at the exact timestamp, and BUY/SELL signals. No Telegram or Discord.",
+    "BTC whale tracker: Mempool.space large transactions, Binance price at the exact timestamp, and BUY/SELL signals.",
+  applicationName: "Whale Signal Desk",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Whale Desk",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#12151c",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
