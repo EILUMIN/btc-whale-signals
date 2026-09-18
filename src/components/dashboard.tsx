@@ -1,42 +1,31 @@
 "use client";
 
 import { LanguageToggle } from "@/components/language-toggle";
-import { WhaleAlertCard } from "@/components/whale-alert-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLanguage } from "@/components/language-provider";
-import { interpolate } from "@/lib/i18n";
-import { formatBtc, formatTimestamp, formatUsd, shortenAddress } from "@/lib/format";
-import type { EngineSnapshot, LivePrice, SignalSide } from "@/lib/types";
-import { priceApiUrl, signalsApiUrl } from "@/lib/urls";
-import {
-  Activity,
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  Radio,
-  RefreshCw,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-
-type Filter = "ALL" | SignalSide;
+import { interpolate, type Dictionary } from "@/lib/i18n";
+import { formatBtc, formatTimestamp, formatUsd } from "@/lib/format";
+import type { MatrixSnapshot, RiskPlan } from "@/lib/matrix";
+import { matrixApiUrl, priceApiUrl } from "@/lib/urls";
+import type { LivePrice } from "@/lib/types";
+import { Radio, RefreshCw, ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
 export function Dashboard() {
   const { t } = useLanguage();
-  const [data, setData] = useState<EngineSnapshot | null>(null);
+  const [data, setData] = useState<MatrixSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<Filter>("ALL");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
-  const [priceError, setPriceError] = useState<string | null>(null);
 
-  const loadSignals = useCallback(async () => {
-    const response = await fetch(signalsApiUrl(), { cache: "no-store" });
-    const json = (await response.json()) as EngineSnapshot;
-    if (!response.ok && !json.signals) {
+  const loadMatrix = useCallback(async () => {
+    const response = await fetch(matrixApiUrl(), { cache: "no-store" });
+    const json = (await response.json()) as MatrixSnapshot;
+    if (!response.ok && !json.live_rsi) {
       throw new Error(json.error || t.fetchError);
     }
     return json;
@@ -46,7 +35,7 @@ export function Dashboard() {
     let cancelled = false;
     const tick = async () => {
       try {
-        const json = await loadSignals();
+        const json = await loadMatrix();
         if (cancelled) return;
         setData(json);
         setError(json.error);
@@ -59,47 +48,38 @@ export function Dashboard() {
       }
     };
     void tick();
-    const timer = setInterval(() => {
-      void tick();
-    }, 10_000);
+    const timer = setInterval(() => void tick(), 10_000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [loadSignals]);
+  }, [loadMatrix]);
 
   useEffect(() => {
     let cancelled = false;
     const tickPrice = async () => {
       try {
         const response = await fetch(priceApiUrl(), { cache: "no-store" });
-        const json = (await response.json()) as LivePrice & { error?: string };
-        if (cancelled) return;
-        if (typeof json.usd === "number" && json.usd > 0) {
+        const json = (await response.json()) as LivePrice;
+        if (!cancelled && typeof json.usd === "number" && json.usd > 0) {
           setLivePrice(json);
-          setPriceError(null);
-        } else {
-          setPriceError(json.error || t.fetchError);
         }
-      } catch (err) {
-        if (cancelled) return;
-        setPriceError(err instanceof Error ? err.message : String(err));
+      } catch {
+        // matrix VWAP remains the source of truth for trades
       }
     };
     void tickPrice();
-    const timer = setInterval(() => {
-      void tickPrice();
-    }, 3_000);
+    const timer = setInterval(() => void tickPrice(), 3_000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [t.fetchError]);
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const json = await loadSignals();
+      const json = await loadMatrix();
       setData(json);
       setError(json.error);
       setUpdatedAt(new Date().toISOString());
@@ -108,20 +88,11 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [loadSignals]);
+  }, [loadMatrix]);
 
-  const signals = useMemo(() => {
-    const rows = data?.signals ?? [];
-    if (filter === "ALL") {
-      return rows.filter((row) => row.signal === "BUY" || row.signal === "SELL");
-    }
-    return rows.filter((row) => row.signal === filter);
-  }, [data, filter]);
-
-  const price = livePrice ?? data?.price;
-  const change = price?.change24hPct;
-  const changeUp = (change ?? 0) >= 0;
-  const threshold = data?.thresholdBtc ?? 500;
+  const headerPrice = livePrice?.usd ?? data?.live_price ?? data?.live_vwap ?? 0;
+  const locked = Boolean(data?.breakoutLock);
+  const signal = data?.signal ?? "WAIT";
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
@@ -143,36 +114,24 @@ export function Dashboard() {
             <p className="text-xs uppercase tracking-wider text-muted-foreground">
               {t.livePrice}
             </p>
-            {price ? (
+            {headerPrice ? (
               <>
                 <p className="font-mono text-3xl font-semibold">
-                  {formatUsd(price.usd)}
+                  {formatUsd(headerPrice)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {price.source} · {t.liveTick}{" "}
-                  {formatTimestamp(Math.floor(new Date(price.timestamp).getTime() / 1000))}
-                  {change !== null && change !== undefined && (
-                    <span
-                      className={
-                        changeUp ? " ml-2 text-emerald-400" : " ml-2 text-red-400"
-                      }
-                    >
-                      {changeUp ? "+" : ""}
-                      {change.toFixed(2)}% 24h
-                    </span>
+                  {livePrice?.source ?? data?.source} · {t.liveTick}{" "}
+                  {formatTimestamp(
+                    Math.floor(
+                      new Date(
+                        livePrice?.timestamp ?? data?.scannedAt ?? 0
+                      ).getTime() / 1000
+                    )
                   )}
                 </p>
               </>
             ) : (
-              <>
-                <Skeleton className="mt-2 h-9 w-40" />
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {t.priceRefreshing}
-                </p>
-              </>
-            )}
-            {priceError && (
-              <p className="mt-1 text-[11px] text-red-300">{priceError}</p>
+              <Skeleton className="mt-2 h-9 w-40" />
             )}
           </div>
         </div>
@@ -180,38 +139,76 @@ export function Dashboard() {
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label={t.whaleThreshold}
-          value={`${threshold} BTC`}
-          hint={interpolate(t.whaleThresholdHint, { threshold })}
+          label={t.liveRsi}
+          value={data ? data.live_rsi.toFixed(2) : "—"}
+          hint={`prev ${data ? data.rsi_prev.toFixed(2) : "—"}`}
+          tone={locked || (data?.live_rsi ?? 0) > 75 ? "sell" : undefined}
         />
         <StatCard
-          label={t.sellShort}
-          value={String(data?.stats.sell ?? 0)}
-          hint={t.sellHint}
-          tone="sell"
+          label={t.liveAtr}
+          value={data ? formatUsd(data.live_atr) : "—"}
+          hint="Lock if ATR > $150 and RSI > 75"
+          tone={(data?.live_atr ?? 0) > 150 ? "sell" : undefined}
         />
         <StatCard
-          label={t.buyAccum}
-          value={String(data?.stats.buy ?? 0)}
-          hint={t.buyHint}
-          tone="buy"
+          label={t.liveVwap}
+          value={data ? formatUsd(data.live_vwap) : "—"}
+          hint={data?.source ?? t.venues}
         />
         <StatCard
-          label={t.exchangeWallets}
-          value={String(data?.trackedWallets ?? 0)}
-          hint={data?.liveFeed ? t.liveWebsocket : t.pollingMempool}
+          label={t.matrixSignal}
+          value={locked ? t.holding : signal}
+          hint={
+            locked
+              ? t.breakoutHold
+              : signal === "SELL"
+                ? t.sellHint
+                : signal === "BUY"
+                  ? t.buyHint
+                  : t.waitingExhaustion
+          }
+          tone={
+            locked || signal === "HOLD"
+              ? "sell"
+              : signal === "BUY"
+                ? "buy"
+                : signal === "SELL"
+                  ? "sell"
+                  : undefined
+          }
         />
       </section>
 
+      {locked && (
+        <Card className="border-red-500/50 bg-red-500/15 shadow-none">
+          <CardContent className="flex items-start gap-3 pt-1">
+            <ShieldAlert className="mt-0.5 size-6 text-red-300" />
+            <div>
+              <p className="text-lg font-bold tracking-wide text-red-100">
+                {t.breakoutHold}
+              </p>
+              <p className="mt-1 text-sm text-red-100/80">{t.breakoutHint}</p>
+              <p className="mt-1 font-mono text-xs text-red-200">
+                live_rsi={data?.live_rsi.toFixed(2)} · live_atr=
+                {formatUsd(data?.live_atr ?? 0)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-300">
+        <Badge
+          variant="outline"
+          className="gap-1 border-emerald-500/30 text-emerald-300"
+        >
           <Radio className="size-3" />
-          {data?.liveFeed ? t.liveFeedConnected : t.connectingLiveFeed}
+          {data?.source || t.connectingLiveFeed}
         </Badge>
         <span>
           {t.lastScan}:{" "}
-          {data?.lastScanAt
-            ? new Date(data.lastScanAt).toLocaleTimeString()
+          {data?.scannedAt
+            ? new Date(data.scannedAt).toLocaleTimeString()
             : t.pending}
         </span>
         {updatedAt && (
@@ -233,120 +230,199 @@ export function Dashboard() {
         </Card>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <section className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-medium">{t.whaleAlerts}</h2>
-            <Tabs
-              value={filter}
-              onValueChange={(value) => {
-                if (
-                  value === "ALL" ||
-                  value === "BUY" ||
-                  value === "SELL" ||
-                  value === "WATCH"
-                ) {
-                  setFilter(value);
-                }
-              }}
-            >
-              <TabsList>
-                <TabsTrigger value="ALL">{t.tabAll}</TabsTrigger>
-                <TabsTrigger value="BUY">BUY</TabsTrigger>
-                <TabsTrigger value="SELL">SELL</TabsTrigger>
-                <TabsTrigger value="WATCH">{t.tabWatch}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+      {loading && !data && (
+        <div className="space-y-3">
+          <Skeleton className="h-48 w-full" />
+          <Skeleton className="h-48 w-full" />
+        </div>
+      )}
 
-          {loading && !data && (
-            <div className="space-y-3">
-              <Skeleton className="h-48 w-full" />
-              <Skeleton className="h-48 w-full" />
-            </div>
-          )}
-
-          {!loading && signals.length === 0 && (
-            <Card className="border-dashed shadow-none">
-              <CardContent className="space-y-2 py-10 text-center">
-                <Activity className="mx-auto size-8 text-amber-400" />
-                <p className="font-medium">
-                  {interpolate(t.emptyTitle, { threshold })}
-                </p>
-                <p className="mx-auto max-w-md text-sm text-muted-foreground">
-                  {interpolate(t.emptyBody, { threshold })}
+      {data && (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <section className="space-y-4">
+            <ArmedTicket data={data} t={t} locked={locked} />
+            <SizerCard
+              title={`${t.positionSizer} · SELL`}
+              plan={data.sellPlan}
+              t={t}
+              active={data.signal === "SELL" && !locked}
+            />
+            <SizerCard
+              title={`${t.positionSizer} · BUY`}
+              plan={data.buyPlan}
+              t={t}
+              active={data.signal === "BUY" && !locked}
+            />
+          </section>
+          <aside className="space-y-4">
+            <Card className="shadow-none">
+              <CardHeader>
+                <CardTitle className="text-sm">{t.venues}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {data.venues.map((venue) => (
+                  <div
+                    key={venue.name}
+                    className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5"
+                  >
+                    <span className="font-medium">{venue.name}</span>
+                    {venue.ok ? (
+                      <span className="font-mono text-xs">
+                        {formatUsd(venue.last)}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-red-300">offline</span>
+                    )}
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground">
+                  Near-touch bids {data.bidsNear.toFixed(2)} BTC · asks{" "}
+                  {data.asksNear.toFixed(2)} BTC
                 </p>
               </CardContent>
             </Card>
-          )}
-
-          <div className="space-y-4">
-            {signals.map((signal) => (
-              <WhaleAlertCard
-                key={signal.id}
-                signal={signal}
-                livePriceUsd={price?.usd}
-              />
-            ))}
-          </div>
-        </section>
-
-        <aside className="space-y-4">
-          <Card className="shadow-none">
-            <CardHeader>
-              <CardTitle className="text-sm">{t.liveTape}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <p className="text-xs text-muted-foreground">{t.liveTapeHint}</p>
-              {(data?.tape ?? []).length === 0 && (
-                <p className="text-sm text-muted-foreground">{t.waitingTape}</p>
-              )}
-              <ul className="space-y-2">
-                {(data?.tape ?? []).slice(0, 10).map((print) => (
-                  <li
-                    key={print.txid}
-                    className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5 font-mono text-xs"
-                  >
-                    <span>{shortenAddress(print.txid)}</span>
-                    <span
-                      className={
-                        print.btc >= threshold
-                          ? "text-amber-300"
-                          : "text-muted-foreground"
-                      }
-                    >
-                      {formatBtc(print.btc)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-none">
-            <CardHeader>
-              <CardTitle className="text-sm">{t.howToRead}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <p className="flex gap-2">
-                <ArrowDownToLine className="mt-0.5 size-4 text-red-400" />
-                <span>
-                  <strong className="text-foreground">{t.inflow}</strong>
-                  {` ${t.inflowExplain}`}
-                </span>
-              </p>
-              <p className="flex gap-2">
-                <ArrowUpFromLine className="mt-0.5 size-4 text-emerald-400" />
-                <span>
-                  <strong className="text-foreground">{t.outflow}</strong>
-                  {` ${t.outflowExplain}`}
-                </span>
-              </p>
-            </CardContent>
-          </Card>
-        </aside>
-      </div>
+            <Card className="shadow-none">
+              <CardHeader>
+                <CardTitle className="text-sm">{t.howToRead}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <p>{t.waitingExhaustion}</p>
+                <p>{t.breakoutHint}</p>
+                <p>{t.profitNote}</p>
+              </CardContent>
+            </Card>
+          </aside>
+        </div>
+      )}
     </div>
+  );
+}
+
+function ArmedTicket({
+  data,
+  t,
+  locked,
+}: {
+  data: MatrixSnapshot;
+  t: Dictionary;
+  locked: boolean;
+}) {
+  const plan = data.armedPlan;
+  if (locked || !plan) {
+    return (
+      <Card className="border-amber-500/40 bg-amber-500/10 shadow-none">
+        <CardContent className="space-y-2 pt-1">
+          <p className="text-sm font-semibold">
+            {locked ? t.breakoutHold : t.waiting}
+          </p>
+          <p className="text-sm text-muted-foreground">{data.recommendation}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  const vars = {
+    entry: formatUsd(plan.entry),
+    exit: formatUsd(plan.takeProfit),
+    stop: formatUsd(plan.stop),
+  };
+  const sell = plan.side === "SELL";
+  return (
+    <Card
+      className={`shadow-none ${
+        sell
+          ? "border-red-500/40 bg-red-500/10"
+          : "border-emerald-500/40 bg-emerald-500/10"
+      }`}
+    >
+      <CardContent className="space-y-3 pt-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wider">
+            {t.armed} · {plan.side}
+          </p>
+          <p className="text-sm font-semibold">
+            {interpolate(sell ? t.sellNow : t.buyNow, {
+              entry: formatUsd(plan.entry),
+            })}
+          </p>
+        </div>
+        <PlanGrid plan={plan} t={t} />
+        <p className="text-sm">
+          {interpolate(sell ? t.sellPlan : t.buyPlan, vars)}
+        </p>
+        <p className="text-[11px] text-muted-foreground">{t.profitNote}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SizerCard({
+  title,
+  plan,
+  t,
+  active,
+}: {
+  title: string;
+  plan: RiskPlan | null;
+  t: Dictionary;
+  active: boolean;
+}) {
+  if (!plan) return null;
+  return (
+    <Card
+      className={`shadow-none ${
+        active ? "border-amber-400/50" : "border-border/60"
+      }`}
+    >
+      <CardHeader>
+        <CardTitle className="text-sm">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <PlanGrid plan={plan} t={t} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function PlanGrid({ plan, t }: { plan: RiskPlan; t: Dictionary }) {
+  return (
+    <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div>
+        <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+          {t.entryVwap}
+        </dt>
+        <dd className="font-mono text-xl font-semibold">
+          {formatUsd(plan.entry)}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+          {t.exitRr}
+        </dt>
+        <dd className="font-mono text-xl font-semibold text-emerald-300">
+          {formatUsd(plan.takeProfit)}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+          {t.stopAtr}
+        </dt>
+        <dd className="font-mono text-xl font-semibold text-red-300">
+          {formatUsd(plan.stop)}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+          {t.sizeBtc}
+        </dt>
+        <dd className="font-mono text-xl font-semibold">
+          {formatBtc(plan.sizeBtc)}
+        </dd>
+        <dd className="text-[11px] text-muted-foreground">
+          {t.riskUsd} {formatUsd(plan.riskUsd)} · {t.notional}{" "}
+          {formatUsd(plan.notionalUsd)}
+        </dd>
+      </div>
+    </dl>
   );
 }
 

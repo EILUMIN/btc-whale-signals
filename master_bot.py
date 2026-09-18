@@ -54,6 +54,7 @@ RSI_OVERBOUGHT = 70.0
 RSI_BREAKOUT = 75.0
 RSI_OVERSOLD = 30.0
 ATR_SPIKE_MULT = 1.5
+ATR_BREAKOUT_USD = 150.0
 SL_ATR_MULT = 1.5
 RR_MULT = 3.0
 BREAKEVEN_FRAC = 0.50
@@ -733,8 +734,7 @@ class MomentumGuard:
             snap.atr_spike = snap.atr >= ATR_SPIKE_MULT * max(snap.atr_avg, 1e-9)
         snap.cross_below_70 = snap.rsi_prev >= RSI_OVERBOUGHT and snap.rsi < RSI_OVERBOUGHT
         snap.recover_from_30 = snap.rsi_prev <= RSI_OVERSOLD and snap.rsi > RSI_OVERSOLD
-        # Even with whale inflow: do NOT sell into a melt-up.
-        snap.breakout_lock = snap.rsi > RSI_BREAKOUT and snap.atr_spike
+        snap.breakout_lock = snap.rsi > RSI_BREAKOUT and snap.atr > ATR_BREAKOUT_USD
         if errors and not rsis:
             snap.error = "; ".join(errors)
         return snap
@@ -786,17 +786,12 @@ def build_plan(
     blocked = []
     if tech.breakout_lock:
         blocked.append(
-            "SELL forbidden: RSI>75 + ATR spike (breakout). Do not fade the melt-up."
+            "BREAKOUT DETECTED - HOLDING SIGNALS (RSI>75 and ATR>$150)."
         )
     plan.blocked = " | ".join(blocked)
 
-    want_sell = (
-        whales.netflow > 0
-        and liq.heavy_sell
-        and tech.cross_below_70
-        and not tech.breakout_lock
-    )
-    want_buy = whales.netflow < 0 and liq.heavy_buy and tech.recover_from_30
+    want_sell = tech.cross_below_70 and not tech.breakout_lock
+    want_buy = tech.recover_from_30 and not tech.breakout_lock
 
     if want_sell:
         stop = entry + SL_ATR_MULT * atr
@@ -806,8 +801,8 @@ def build_plan(
         plan = TradePlan(
             side="SELL",
             reason=(
-                "Netflow (+) whale inflow to exchanges + heavy ask walls "
-                "+ RSI crossed back below 70 (exhaustion)."
+                "RSI exhaustion drop below 70. Entry is live Global VWAP. "
+                "1:3 take-profit from 1.5× ATR stop. Not a stale whale wall."
             ),
             entry=entry,
             stop=stop,
@@ -825,8 +820,8 @@ def build_plan(
         plan = TradePlan(
             side="BUY",
             reason=(
-                "Netflow (−) whale outflow to cold wallets + heavy bid walls "
-                "+ RSI recovered from oversold (<30)."
+                "RSI lifted from oversold (<30). Entry is live Global VWAP. "
+                "1:3 take-profit from 1.5× ATR stop."
             ),
             entry=entry,
             stop=stop,

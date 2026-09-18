@@ -90,6 +90,10 @@ export function signalsApiUrl() {
   return apiUrl("/api/signals");
 }
 
+export function matrixApiUrl() {
+  return apiUrl("/api/signals");
+}
+
 /** Live BTC/USD only — does not wait for a mempool scan or whale timestamp. */
 export function priceApiUrl() {
   return apiUrl("/api/price");

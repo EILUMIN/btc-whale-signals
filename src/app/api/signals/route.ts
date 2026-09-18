@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSnapshot } from "@/lib/engine";
+import { getMatrixSnapshot } from "@/lib/ccxt-engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,11 +7,9 @@ export const maxDuration = 60;
 
 export async function GET() {
   try {
-    const snapshot = await getSnapshot();
+    const snapshot = await getMatrixSnapshot();
     return NextResponse.json(snapshot, {
-      headers: {
-        "Cache-Control": "no-store",
-      },
+      headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -19,17 +17,30 @@ export async function GET() {
       {
         ok: false,
         error: message,
-        price: null,
-        thresholdBtc: Number(process.env.WHALE_THRESHOLD_BTC ?? 500),
-        lastScanAt: null,
-        scanning: false,
-        liveFeed: false,
-        trackedWallets: 0,
-        stats: { buy: 0, sell: 0, watch: 0, total: 0 },
-        signals: [],
-        tape: [],
+        live_rsi: 0,
+        live_atr: 0,
+        live_vwap: 0,
+        live_price: 0,
+        rsi_prev: 0,
+        breakoutLock: false,
+        lockText: null,
+        exhaustionDrop: false,
+        recoverFromOversold: false,
+        signal: "WAIT",
+        recommendation: message,
+        sellPlan: null,
+        buyPlan: null,
+        armedPlan: null,
+        venues: [],
+        bidsNear: 0,
+        asksNear: 0,
+        heavySell: false,
+        heavyBuy: false,
+        bars: 0,
+        scannedAt: new Date().toISOString(),
+        source: "error",
       },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }

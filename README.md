@@ -1,104 +1,50 @@
 # Whale Signal Desk
 
-Local BTC/USD whale tracker. Binabasa nito ang malalaking Bitcoin transaksyon mula sa [Mempool.space](https://mempool.space). Ang **live BTC price** ay nire-refresh nang hiwalay (bawat ~3 segundo) — hindi ito hinihintay ang oras ng whale. Ang timestamp at print ng whale ay frozen sa mismong transaksyon.
+BTC/USD multi-exchange desk. Public **CCXT** pulls Binance, Coinbase, and Kraken together — walang private API keys. Canada-safe: Binance.com → Binance.US fallback.
 
-Walang Telegram, Discord, o ibang messaging bot. Ikaw lang ang makakakita ng alerts.
+Hindi na base ang signal sa lumang $64k whale wall o simpleng wallet notification.
 
-## Saan mag-BUY at mag-SELL
+## Signal generator
 
-Oo — ang direction ay base sa **pinasok vs nilabas** na pera:
+| Condition | Result |
+| --- | --- |
+| **live_atr > 150** at **live_rsi > 75** | **BREAKOUT DETECTED - HOLDING SIGNALS** |
+| RSI tumawid pabalik **below 70** (exhaustion) | **SELL / SHORT** at live Global VWAP |
+| RSI umahon mula **<30** | **BUY / LONG** at live Global VWAP |
 
-| Galaw | Ano ang nangyari | Signal |
-| --- | --- | --- |
-| **Wallet → Exchange** | Pera **PAPASOK** sa exchange (inflow / pinasok para ibenta) | **MAG-SELL / SHORT** + resistance |
-| **Exchange → Wallet** | Pera **PALABAS** ng exchange (outflow / nilabas para i-hold) | **MAG-BUY / ACCUMULATE** + support |
-| Exchange internal / unlabeled | Hindi malinaw | **WATCH** — walang entry/exit |
+Risk math (auto-updates from live VWAP):
 
-## Live price vs whale print
-
-- **ENTRY / EXIT / STOP** sa trade ticket = **live BTC** ngayon. Ito ang nire-refresh bago gumalaw ang oras ng whale.
-- **Whale price level** (amber box) = frozen print nung pumasok/lumabas ang coins. Hindi ito nagiging live price.
-- Kung magkalayo ang live at ang lumang print (hal. Aug 10 @ $64,935 vs live ~$76k), may stale warning. Hindi take-profit ang $6,493 sa $65k na short — iyon bug; ang EXIT ngayon ay **90% ng 3R** mula entry→stop, hindi 90% ng presyo ng Bitcoin.
-
-## Ano ang ginagawa nito
-
-1. **Data ingestion** — live mempool websocket + polling sa Mempool.space. Tinututukan ang transaksyong **≥ 500 BTC**, kasama ang timestamp at from/to addresses.
-2. **Live price** — `GET /api/price` (Binance `BTCUSDT`, fallback Binance.US, tapos Mempool.space). Hindi naghihintay ng mempool scan.
-3. **Whale print** — kung lumang transaksyon, 1-minute kline sa mismong oras. Frozen sa card.
-4. **Signal logic** — inflow = SELL, outflow = BUY, gaya ng table sa itaas.
-5. **Display** — local web desk at optional terminal log. May **English / Tagalog** toggle sa itaas ng dashboard.
-6. **Production fetch** — lahat ng server fetch ay absolute URL. Ang Mempool calls ay `https://mempool.space/api/...`. Relative paths ay sine-resolve gamit ang `NEXT_PUBLIC_VERCEL_URL` / `VERCEL_URL` para hindi mag-fail sa Vercel (`Failed to parse URL from /mempool/recent`).
-
-```
-🚨 BTC WHALE ALERT 🚨
-Oras (Timestamp): ...
-Dami at Galaw: ... BTC · Wallet to Exchange / Exchange to Wallet
-Price Level: $...
-Signal Recommendation: BUY o SELL
-```
-
-## Python signal engine (`master_bot.py`)
-
-Isang file na Global Crypto Market Aggregator & Signal Engine. Public data lang — walang private API keys.
-
-```bash
-pip install -r requirements-bot.txt
-python3 master_bot.py
-python3 master_bot.py --once          # isang frame, tapos exit
-python3 master_bot.py --wallet 1000
-```
-
-- **Module 1** Binance + Coinbase + Kraken order books (ccxt). Binance.US fallback kung naka-block ang Binance.com (Canada).
-- **Module 2** Whale inflow/outflow >100 BTC via Mempool.space. Netflow = in − out.
-- **Module 3** US spot BTC ETF daily net (Farside; SoSoValue fallback). ≥$100M inflow = BULLISH APPRECIATION.
-- **Module 4** Combined RSI(14), ATR(14), VWAP. Walang SELL kung RSI>75 + ATR spike. SELL only after RSI crosses back below 70.
-- **Module 5** 1:3 R:R, 1% risk sa $1,000 wallet, breakeven guard at 50% to TP.
-
-Hindi ito financial advice.
-
-## Web desk
-
-Kailangan: Node.js 20+
+- **ENTRY** = Global VWAP (tatlong exchange)
+- **STOP** = 1.5× ATR
+- **TAKE PROFIT** = 1:3 vs stop distance
+- **SIZE** = 1% of $1,000 wallet ($10 risk)
 
 ```bash
 npm install
 npm run dev
 ```
 
-Buksan ang dashboard sa [http://127.0.0.1:43127](http://127.0.0.1:43127).
+Dashboard: [http://127.0.0.1:43127](http://127.0.0.1:43127)
+
+## Python twin (`master_bot.py`)
+
+```bash
+pip install -r requirements-bot.txt
+python3 master_bot.py
+python3 master_bot.py --once
+```
+
+Parehong lock (RSI>75 + ATR>$150) at 1:3 VWAP math. Terminal dashboard every 10s.
+
+Hindi ito financial advice.
 
 ### Sa smartphone
 
-Ang `127.0.0.1` at Cursor preview URL (`*.agent.cvm.dev`) ay hindi magbubukas sa phone. I-deploy sa Vercel (Publish sa Cursor) para makakuha ng `https://…vercel.app` link, tapos i-bookmark o Add to Home Screen.
+I-deploy sa Vercel (Publish) para sa `https://…vercel.app`. Walang kailangang API key.
 
-Terminal-only monitor (parehong engine, naka-print sa console):
-
-```bash
-npm run monitor
-```
-
-Production build:
+Production:
 
 ```bash
 npm run build
 npm start
 ```
-
-## Config
-
-Optional env vars (see `.env.example`):
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `WHALE_THRESHOLD_BTC` | `500` | Minimum BTC para maging whale alert |
-| `MEMPOOL_API_BASE` | `https://mempool.space/api` | Esplora API |
-| `MEMPOOL_WS_URL` | `wss://mempool.space/api/v1/ws` | Live mempool feed |
-| `NEXT_PUBLIC_VERCEL_URL` | (Vercel auto) | App origin; ginagamit para gawing absolute ang relative fetch URLs |
-
-Walang API key ang kailangan.
-
-## Paalala
-
-- 500 BTC na galaw ay bihira. Ang dashboard ay maghihintay nang tahimik hanggang may dumating; may live tape para sa mas maliliit na prints.
-- Ang exchange labels ay best-effort mula sa public cluster addresses. Unknown destination = wallet / cold storage.
-- Hindi ito financial advice. On-chain flow ay isa lang sa mga input sa trading.
