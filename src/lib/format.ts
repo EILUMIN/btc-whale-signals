@@ -1,4 +1,5 @@
 import { dictionaries, type Language } from "@/lib/i18n";
+import { tradePlanFor } from "@/lib/trade-plan";
 import type { WhaleSignal } from "@/lib/types";
 
 function pad(value: number) {
@@ -52,10 +53,20 @@ export function formatAlert(signal: WhaleSignal, language: Language = "fil") {
     : "Wallet";
   const toLabel = signal.primaryTo.entity ? signal.primaryTo.entity : "Wallet";
 
+  const plan = tradePlanFor(signal);
+  const tradeLines = plan
+    ? [
+        `${t.entry}: ${formatUsd(plan.entry)} (${t.tradeWhen} ${formatTimestamp(plan.whenUnix)})`,
+        `${t.exit}: ${formatUsd(plan.exit)} (${plan.profitPct}%)`,
+        `${t.stopLoss}: ${formatUsd(plan.stop)}`,
+      ]
+    : [t.watchNotTrade];
+
   return [
     "🚨 BTC WHALE ALERT 🚨",
     `${t.signalRecommendation}: ${signal.recommendation}`,
     `${t.sizeAndMove}: ${formatBtc(signal.btcAmount)} · ${signal.movement} (${fromLabel} → ${toLabel})`,
+    ...tradeLines,
     `${t.placedWhen}: ${formatTimestamp(signal.timestampUnix)}`,
     `${t.placedAt}: ${placed}`,
     stopLine,

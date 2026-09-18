@@ -1,6 +1,7 @@
 import { classifyTransaction } from "../src/lib/classify";
 import { decideSignal } from "../src/lib/signals";
-import type { EsploraTx } from "../src/lib/types";
+import { tradePlanFor } from "../src/lib/trade-plan";
+import type { EsploraTx, WhaleSignal } from "../src/lib/types";
 import { mempoolUrl } from "../src/lib/urls";
 
 const SATS = 100_000_000;
@@ -43,6 +44,27 @@ if (sell.signal !== "SELL") throw new Error("sell signal");
 if (buy.signal !== "BUY") throw new Error("buy signal");
 if (sell.keyLevel.noteKey !== "inflow") throw new Error("inflow note key");
 if (buy.keyLevel.noteKey !== "outflow") throw new Error("outflow note key");
+
+const buySignal = {
+  signal: "BUY",
+  priceUsd: 76606.61,
+  timestampUnix: 1,
+  keyLevel: buy.keyLevel,
+} as WhaleSignal;
+const buyPlan = tradePlanFor(buySignal);
+if (!buyPlan || buyPlan.exit !== 145552.56) {
+  throw new Error(`buy 90% tp expected 145552.56 got ${buyPlan?.exit}`);
+}
+const sellSignal = {
+  signal: "SELL",
+  priceUsd: 76606.61,
+  timestampUnix: 1,
+  keyLevel: sell.keyLevel,
+} as WhaleSignal;
+const sellPlan = tradePlanFor(sellSignal);
+if (!sellPlan || sellPlan.exit !== 7660.66) {
+  throw new Error(`sell 90% tp expected 7660.66 got ${sellPlan?.exit}`);
+}
 
 const recent = mempoolUrl("/mempool/recent");
 if (!recent.startsWith("https://mempool.space/api/mempool/recent")) {

@@ -28,7 +28,22 @@ export const dictionaries = {
     feedError: "Data feed problem: {error}. Retrying.",
     fetchError: "Could not load signals",
     whaleAlerts: "Whale alerts",
-    tabAll: "All",
+    tabAll: "Trades",
+    tabWatch: "WATCH",
+    entry: "ENTRY",
+    exit: "EXIT · 90% TP",
+    stopLoss: "STOP",
+    tradeWhen: "When",
+    tradeAt: "Price level",
+    profitTarget: "90% profit target",
+    buyPlan:
+      "BUY: enter at {entry}. Take profit (90%) at {exit}. Invalid if price breaks {stop}.",
+    sellPlan:
+      "SELL: enter at {entry}. Take profit (90%) at {exit}. Invalid if price breaks {stop}.",
+    watchNotTrade:
+      "This is NOT a buy/sell. Binance-to-Binance (or unlabeled) flow has no entry/exit. Open the BUY or SELL tab for trade levels.",
+    profitNote:
+      "90% is a target, not a guarantee. Manage size. Not financial advice.",
     emptyTitle: "No {threshold}+ BTC whale move right now",
     emptyBody:
       "{threshold} BTC transfers are rare. The mempool and known exchange wallets are being monitored. Alerts appear here with the exact price level when one lands.",
@@ -110,7 +125,22 @@ export const dictionaries = {
     feedError: "May problema sa data feed: {error}. Patuloy ang retry.",
     fetchError: "Hindi makuha ang signals",
     whaleAlerts: "Whale alerts",
-    tabAll: "Lahat",
+    tabAll: "Trades",
+    tabWatch: "WATCH",
+    entry: "ENTRY",
+    exit: "EXIT · 90% TP",
+    stopLoss: "STOP",
+    tradeWhen: "Kailan",
+    tradeAt: "Price level",
+    profitTarget: "90% profit target",
+    buyPlan:
+      "BUY: pumasok sa {entry}. Take profit (90%) sa {exit}. Invalid kung bumaba ng {stop}.",
+    sellPlan:
+      "SELL: pumasok sa {entry}. Take profit (90%) sa {exit}. Invalid kung tumaas ng {stop}.",
+    watchNotTrade:
+      "HINDI ito buy/sell. Internal exchange transfer — walang entry/exit. Pindutin ang BUY o SELL tab para sa trade levels.",
+    profitNote:
+      "Target ang 90%, hindi guaranteed. Ikaw ang may risk. Hindi financial advice.",
     emptyTitle: "Walang {threshold}+ BTC whale move sa ngayon",
     emptyBody:
       "Bihira ang {threshold} BTC na galaw. Naka-monitor ang mempool at mga kilalang exchange wallets. Lalabas dito ang alert kapag may dumating, kasama ang exact price level.",

@@ -14,6 +14,7 @@ import {
   shortenAddress,
 } from "@/lib/format";
 import type { MovementKind, WhaleSignal } from "@/lib/types";
+import { tradePlanFor } from "@/lib/trade-plan";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useState } from "react";
 
@@ -114,6 +115,8 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
           </div>
         </dl>
 
+        <TradeTicket signal={signal} t={t} />
+
         <LevelMap signal={signal} t={t} />
 
         <div className="grid gap-3 rounded-lg border border-border/70 bg-background/40 p-3 text-xs sm:grid-cols-2">
@@ -138,6 +141,76 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function TradeTicket({
+  signal,
+  t,
+}: {
+  signal: WhaleSignal;
+  t: Dictionary;
+}) {
+  const plan = tradePlanFor(signal);
+  if (!plan) {
+    return (
+      <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+        {t.watchNotTrade}
+      </div>
+    );
+  }
+  const vars = {
+    entry: formatUsd(plan.entry),
+    exit: formatUsd(plan.exit),
+    stop: formatUsd(plan.stop),
+  };
+  return (
+    <div
+      className={`space-y-3 rounded-xl border p-3 ${
+        plan.side === "BUY"
+          ? "border-emerald-500/40 bg-emerald-500/10"
+          : "border-red-500/40 bg-red-500/10"
+      }`}
+    >
+      <p className="text-xs font-semibold uppercase tracking-wider">
+        {t.profitTarget}
+      </p>
+      <dl className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.entry}
+          </dt>
+          <dd className="font-mono text-xl font-semibold">
+            {formatUsd(plan.entry)}
+          </dd>
+          <dd className="text-[11px] text-muted-foreground">
+            {t.tradeWhen}: {formatTimestamp(plan.whenUnix)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.exit}
+          </dt>
+          <dd className="font-mono text-xl font-semibold text-emerald-300">
+            {formatUsd(plan.exit)}
+          </dd>
+          <dd className="text-[11px] text-muted-foreground">+{plan.profitPct}%</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.stopLoss}
+          </dt>
+          <dd className="font-mono text-xl font-semibold text-red-300">
+            {formatUsd(plan.stop)}
+          </dd>
+          <dd className="text-[11px] text-muted-foreground">{t.tradeAt}</dd>
+        </div>
+      </dl>
+      <p className="text-sm leading-relaxed">
+        {interpolate(plan.side === "BUY" ? t.buyPlan : t.sellPlan, vars)}
+      </p>
+      <p className="text-[11px] text-muted-foreground">{t.profitNote}</p>
+    </div>
   );
 }
 

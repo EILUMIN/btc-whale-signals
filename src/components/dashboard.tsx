@@ -82,7 +82,9 @@ export function Dashboard() {
 
   const signals = useMemo(() => {
     const rows = data?.signals ?? [];
-    if (filter === "ALL") return rows;
+    if (filter === "ALL") {
+      return rows.filter((row) => row.signal === "BUY" || row.signal === "SELL");
+    }
     return rows.filter((row) => row.signal === filter);
   }, [data, filter]);
 
@@ -213,7 +215,7 @@ export function Dashboard() {
                 <TabsTrigger value="ALL">{t.tabAll}</TabsTrigger>
                 <TabsTrigger value="BUY">BUY</TabsTrigger>
                 <TabsTrigger value="SELL">SELL</TabsTrigger>
-                <TabsTrigger value="WATCH">WATCH</TabsTrigger>
+                <TabsTrigger value="WATCH">{t.tabWatch}</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
