@@ -42,9 +42,17 @@ export function M1Chart({
 
   const lows = slice.map((b) => b.low);
   const highs = slice.map((b) => b.high);
-  const extras = [live, vwap, entry, stop, takeProfit].filter(
-    (n): n is number => typeof n === "number" && n > 0
+  const nearbyWalls = walls.filter(
+    (wall) => live > 0 && Math.abs(wall.price - live) / live <= 0.08
   );
+  const extras = [
+    live,
+    vwap,
+    entry,
+    stop,
+    takeProfit,
+    ...nearbyWalls.flatMap((wall) => [wall.priceLow, wall.priceHigh]),
+  ].filter((n): n is number => typeof n === "number" && n > 0);
   const min = Math.min(...lows, ...extras);
   const max = Math.max(...highs, ...extras);
   const span = Math.max(max - min, 8);
