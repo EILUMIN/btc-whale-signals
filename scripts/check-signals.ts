@@ -1,6 +1,6 @@
 import { classifyTransaction } from "../src/lib/classify";
 import { decideSignal } from "../src/lib/signals";
-import { tradePlanFor } from "../src/lib/trade-plan";
+import { moneyFlowFor, tradePlanFor } from "../src/lib/trade-plan";
 import type { EsploraTx, WhaleSignal } from "../src/lib/types";
 import { mempoolUrl } from "../src/lib/urls";
 
@@ -47,28 +47,77 @@ if (buy.keyLevel.noteKey !== "outflow") throw new Error("outflow note key");
 
 const buySignal = {
   signal: "BUY",
+  movement: outflow.movement,
   priceUsd: 76606.61,
   timestampUnix: 1,
   keyLevel: buy.keyLevel,
 } as WhaleSignal;
 const buyPlan = tradePlanFor(buySignal);
-if (!buyPlan || buyPlan.exit !== 145552.56) {
-  throw new Error(`buy 90% tp expected 145552.56 got ${buyPlan?.exit}`);
+if (!buyPlan) throw new Error("buy plan missing");
+if (buyPlan.side !== "BUY") throw new Error("buy side");
+if (moneyFlowFor(buySignal) !== "out") throw new Error("buy is money OUT of exchange");
+if (buyPlan.exit <= buyPlan.entry) throw new Error("buy exit must be above entry");
+if (buyPlan.exit >= buyPlan.entry * 1.5) {
+  throw new Error(`buy TP must not be 90% of BTC price, got ${buyPlan.exit}`);
 }
+if (buyPlan.rMultiple !== 2.7) throw new Error(`expected 2.7R got ${buyPlan.rMultiple}`);
+
 const sellSignal = {
   signal: "SELL",
+  movement: inflow.movement,
   priceUsd: 76606.61,
   timestampUnix: 1,
   keyLevel: sell.keyLevel,
 } as WhaleSignal;
 const sellPlan = tradePlanFor(sellSignal);
-if (!sellPlan || sellPlan.exit !== 7660.66) {
-  throw new Error(`sell 90% tp expected 7660.66 got ${sellPlan?.exit}`);
+if (!sellPlan) throw new Error("sell plan missing");
+if (sellPlan.side !== "SELL") throw new Error("sell side");
+if (moneyFlowFor(sellSignal) !== "in") throw new Error("sell is money IN to exchange");
+if (sellPlan.exit >= sellPlan.entry) throw new Error("sell exit must be below entry");
+if (sellPlan.exit <= sellPlan.entry * 0.5) {
+  throw new Error(
+    `sell TP must not dump 90% of BTC price (old bug $6,493). got ${sellPlan.exit}`
+  );
 }
+if (sellPlan.exit === 7660.66) throw new Error("regressed to 90% of spot");
+
+const screenshotSell = {
+  signal: "SELL",
+  movement: "Wallet to Exchange",
+  priceUsd: 64935.44,
+  timestampUnix: 1_723_297_267,
+  keyLevel: {
+    kind: "resistance",
+    price: 64935.44,
+    zoneLow: 64935.44,
+    zoneHigh: 65260.12,
+    noteKey: "inflow",
+    note: "",
+  },
+} as WhaleSignal;
+const live = 76000;
+const liveSell = tradePlanFor(screenshotSell, live);
+if (!liveSell) throw new Error("live sell plan missing");
+if (liveSell.entry !== live) throw new Error(`entry should be live ${live}, got ${liveSell.entry}`);
+if (liveSell.exit === 6493.54 || liveSell.exit < 50000) {
+  throw new Error(`screenshot bug still present: exit ${liveSell.exit}`);
+}
+if (!liveSell.stalePrint) throw new Error("Aug print vs live 76k should be marked stale");
+if (liveSell.usedLivePrice !== true) throw new Error("must use live price");
+if (Math.abs(liveSell.exit - (live - 2.7 * liveSell.riskUsd)) > 0.05) {
+  throw new Error(`exit should be entry - 2.7R, got ${liveSell.exit}`);
+}
+
+const liveBuy = tradePlanFor(buySignal, live);
+if (!liveBuy || liveBuy.entry !== live) throw new Error("live buy entry");
+if (liveBuy.exit <= live) throw new Error("live buy exit");
 
 const recent = mempoolUrl("/mempool/recent");
 if (!recent.startsWith("https://mempool.space/api/mempool/recent")) {
   throw new Error(`expected absolute mempool URL, got ${recent}`);
 }
 
+console.log("buy", buyPlan.entry, "→", buyPlan.exit, "stop", buyPlan.stop);
+console.log("sell", sellPlan.entry, "→", sellPlan.exit, "stop", sellPlan.stop);
+console.log("live sell", liveSell.entry, "→", liveSell.exit, "stop", liveSell.stop);
 console.log("ok");

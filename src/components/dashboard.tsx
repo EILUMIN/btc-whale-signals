@@ -9,9 +9,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLanguage } from "@/components/language-provider";
 import { interpolate } from "@/lib/i18n";
-import { formatBtc, formatUsd, shortenAddress } from "@/lib/format";
-import type { EngineSnapshot, SignalSide } from "@/lib/types";
-import { signalsApiUrl } from "@/lib/urls";
+import { formatBtc, formatTimestamp, formatUsd, shortenAddress } from "@/lib/format";
+import type { EngineSnapshot, LivePrice, SignalSide } from "@/lib/types";
+import { priceApiUrl, signalsApiUrl } from "@/lib/urls";
 import {
   Activity,
   ArrowDownToLine,
@@ -30,6 +30,8 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("ALL");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   const loadSignals = useCallback(async () => {
     const response = await fetch(signalsApiUrl(), { cache: "no-store" });
@@ -66,6 +68,34 @@ export function Dashboard() {
     };
   }, [loadSignals]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const tickPrice = async () => {
+      try {
+        const response = await fetch(priceApiUrl(), { cache: "no-store" });
+        const json = (await response.json()) as LivePrice & { error?: string };
+        if (cancelled) return;
+        if (typeof json.usd === "number" && json.usd > 0) {
+          setLivePrice(json);
+          setPriceError(null);
+        } else {
+          setPriceError(json.error || t.fetchError);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setPriceError(err instanceof Error ? err.message : String(err));
+      }
+    };
+    void tickPrice();
+    const timer = setInterval(() => {
+      void tickPrice();
+    }, 3_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [t.fetchError]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -88,7 +118,7 @@ export function Dashboard() {
     return rows.filter((row) => row.signal === filter);
   }, [data, filter]);
 
-  const price = data?.price;
+  const price = livePrice ?? data?.price;
   const change = price?.change24hPct;
   const changeUp = (change ?? 0) >= 0;
   const threshold = data?.thresholdBtc ?? 500;
@@ -119,7 +149,8 @@ export function Dashboard() {
                   {formatUsd(price.usd)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {price.source}
+                  {price.source} · {t.liveTick}{" "}
+                  {formatTimestamp(Math.floor(new Date(price.timestamp).getTime() / 1000))}
                   {change !== null && change !== undefined && (
                     <span
                       className={
@@ -133,7 +164,15 @@ export function Dashboard() {
                 </p>
               </>
             ) : (
-              <Skeleton className="mt-2 h-9 w-40" />
+              <>
+                <Skeleton className="mt-2 h-9 w-40" />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t.priceRefreshing}
+                </p>
+              </>
+            )}
+            {priceError && (
+              <p className="mt-1 text-[11px] text-red-300">{priceError}</p>
             )}
           </div>
         </div>
@@ -243,7 +282,11 @@ export function Dashboard() {
 
           <div className="space-y-4">
             {signals.map((signal) => (
-              <WhaleAlertCard key={signal.id} signal={signal} />
+              <WhaleAlertCard
+                key={signal.id}
+                signal={signal}
+                livePriceUsd={price?.usd}
+              />
             ))}
           </div>
         </section>

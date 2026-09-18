@@ -1,18 +1,33 @@
 # Whale Signal Desk
 
-Local BTC/USD whale tracker. Binabasa nito ang malalaking Bitcoin transaksyon mula sa [Mempool.space](https://mempool.space), kinukuha ang eksaktong BTC price sa oras ng galaw (Binance, with fallbacks), at naglalabas ng BUY/SELL signal sa isang local dashboard.
+Local BTC/USD whale tracker. Binabasa nito ang malalaking Bitcoin transaksyon mula sa [Mempool.space](https://mempool.space). Ang **live BTC price** ay nire-refresh nang hiwalay (bawat ~3 segundo) — hindi ito hinihintay ang oras ng whale. Ang timestamp at print ng whale ay frozen sa mismong transaksyon.
 
 Walang Telegram, Discord, o ibang messaging bot. Ikaw lang ang makakakita ng alerts.
+
+## Saan mag-BUY at mag-SELL
+
+Oo — ang direction ay base sa **pinasok vs nilabas** na pera:
+
+| Galaw | Ano ang nangyari | Signal |
+| --- | --- | --- |
+| **Wallet → Exchange** | Pera **PAPASOK** sa exchange (inflow / pinasok para ibenta) | **MAG-SELL / SHORT** + resistance |
+| **Exchange → Wallet** | Pera **PALABAS** ng exchange (outflow / nilabas para i-hold) | **MAG-BUY / ACCUMULATE** + support |
+| Exchange internal / unlabeled | Hindi malinaw | **WATCH** — walang entry/exit |
+
+## Live price vs whale print
+
+- **ENTRY / EXIT / STOP** sa trade ticket = **live BTC** ngayon. Ito ang nire-refresh bago gumalaw ang oras ng whale.
+- **Whale price level** (amber box) = frozen print nung pumasok/lumabas ang coins. Hindi ito nagiging live price.
+- Kung magkalayo ang live at ang lumang print (hal. Aug 10 @ $64,935 vs live ~$76k), may stale warning. Hindi take-profit ang $6,493 sa $65k na short — iyon bug; ang EXIT ngayon ay **90% ng 3R** mula entry→stop, hindi 90% ng presyo ng Bitcoin.
 
 ## Ano ang ginagawa nito
 
 1. **Data ingestion** — live mempool websocket + polling sa Mempool.space. Tinututukan ang transaksyong **≥ 500 BTC**, kasama ang timestamp at from/to addresses.
-2. **Price level** — Binance `BTCUSDT` (fallback: Binance.US, tapos Mempool.space prices). Kung lumang transaksyon, 1-minute kline sa mismong oras.
-3. **Signal logic**
-   - Inflow papuntang exchange → `SELL / SHORT SETUP` + tinatayang resistance
-   - Outflow palabas ng exchange papuntang wallet → `BUY / ACCUMULATION` + tinatayang support
-4. **Display** — local web desk at optional terminal log. May **English / Tagalog** toggle sa itaas ng dashboard.
-5. **Production fetch** — lahat ng server fetch ay absolute URL. Ang Mempool calls ay `https://mempool.space/api/...`. Relative paths ay sine-resolve gamit ang `NEXT_PUBLIC_VERCEL_URL` / `VERCEL_URL` para hindi mag-fail sa Vercel (`Failed to parse URL from /mempool/recent`).
+2. **Live price** — `GET /api/price` (Binance `BTCUSDT`, fallback Binance.US, tapos Mempool.space). Hindi naghihintay ng mempool scan.
+3. **Whale print** — kung lumang transaksyon, 1-minute kline sa mismong oras. Frozen sa card.
+4. **Signal logic** — inflow = SELL, outflow = BUY, gaya ng table sa itaas.
+5. **Display** — local web desk at optional terminal log. May **English / Tagalog** toggle sa itaas ng dashboard.
+6. **Production fetch** — lahat ng server fetch ay absolute URL. Ang Mempool calls ay `https://mempool.space/api/...`. Relative paths ay sine-resolve gamit ang `NEXT_PUBLIC_VERCEL_URL` / `VERCEL_URL` para hindi mag-fail sa Vercel (`Failed to parse URL from /mempool/recent`).
 
 ```
 🚨 BTC WHALE ALERT 🚨

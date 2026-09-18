@@ -14,8 +14,8 @@ import {
   shortenAddress,
 } from "@/lib/format";
 import type { MovementKind, WhaleSignal } from "@/lib/types";
-import { tradePlanFor } from "@/lib/trade-plan";
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { moneyFlowFor, tradePlanFor } from "@/lib/trade-plan";
+import { ArrowDownToLine, ArrowUpFromLine, Check, Copy, ExternalLink } from "lucide-react";
 import { useState } from "react";
 
 function movementLabel(t: Dictionary, movement: MovementKind) {
@@ -51,7 +51,13 @@ function addressLabel(t: Dictionary, label: string) {
   return label;
 }
 
-export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
+export function WhaleAlertCard({
+  signal,
+  livePriceUsd,
+}: {
+  signal: WhaleSignal;
+  livePriceUsd?: number | null;
+}) {
   const { language, t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const isSell = signal.signal === "SELL";
@@ -68,7 +74,9 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
       : "bg-amber-500/15 text-amber-200 border-amber-500/30";
 
   async function copyAlert() {
-    await navigator.clipboard.writeText(formatAlert(signal, language));
+    await navigator.clipboard.writeText(
+      formatAlert(signal, language, livePriceUsd)
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   }
@@ -94,6 +102,8 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
           </Badge>
         </div>
 
+        <MoneyFlowBanner signal={signal} t={t} />
+
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <div className="space-y-1">
             <dt className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -115,7 +125,7 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
           </div>
         </dl>
 
-        <TradeTicket signal={signal} t={t} />
+        <TradeTicket signal={signal} t={t} livePriceUsd={livePriceUsd} />
 
         <LevelMap signal={signal} t={t} />
 
@@ -144,14 +154,49 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
   );
 }
 
-function TradeTicket({
+function MoneyFlowBanner({
   signal,
   t,
 }: {
   signal: WhaleSignal;
   t: Dictionary;
 }) {
-  const plan = tradePlanFor(signal);
+  const flow = moneyFlowFor(signal);
+  if (flow === "none") return null;
+  const isIn = flow === "in";
+  return (
+    <div
+      className={`flex gap-2 rounded-lg border px-3 py-2 text-sm ${
+        isIn
+          ? "border-red-500/40 bg-red-500/10 text-red-100"
+          : "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
+      }`}
+    >
+      {isIn ? (
+        <ArrowDownToLine className="mt-0.5 size-4 shrink-0" />
+      ) : (
+        <ArrowUpFromLine className="mt-0.5 size-4 shrink-0" />
+      )}
+      <div>
+        <p className="font-semibold">{isIn ? t.moneyInTitle : t.moneyOutTitle}</p>
+        <p className="text-xs opacity-90">
+          {isIn ? t.moneyInBody : t.moneyOutBody}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function TradeTicket({
+  signal,
+  t,
+  livePriceUsd,
+}: {
+  signal: WhaleSignal;
+  t: Dictionary;
+  livePriceUsd?: number | null;
+}) {
+  const plan = tradePlanFor(signal, livePriceUsd);
   if (!plan) {
     return (
       <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
@@ -172,9 +217,24 @@ function TradeTicket({
           : "border-red-500/40 bg-red-500/10"
       }`}
     >
-      <p className="text-xs font-semibold uppercase tracking-wider">
-        {t.profitTarget}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider">
+          {t.profitTarget}
+        </p>
+        <p className="text-sm font-semibold">
+          {interpolate(plan.side === "BUY" ? t.buyNow : t.sellNow, {
+            entry: formatUsd(plan.entry),
+          })}
+        </p>
+      </div>
+      {plan.stalePrint && (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-100">
+          {interpolate(t.stalePrint, {
+            whale: formatUsd(plan.whalePrice),
+            when: formatTimestamp(plan.whenUnix),
+          })}
+        </p>
+      )}
       <dl className="grid gap-3 sm:grid-cols-3">
         <div>
           <dt className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -184,7 +244,9 @@ function TradeTicket({
             {formatUsd(plan.entry)}
           </dd>
           <dd className="text-[11px] text-muted-foreground">
-            {t.tradeWhen}: {formatTimestamp(plan.whenUnix)}
+            {plan.usedLivePrice
+              ? `${t.liveTick}: ${formatTimestamp(plan.liveWhenUnix)}`
+              : `${t.tradeWhen}: ${formatTimestamp(plan.whenUnix)}`}
           </dd>
         </div>
         <div>
@@ -194,7 +256,12 @@ function TradeTicket({
           <dd className="font-mono text-xl font-semibold text-emerald-300">
             {formatUsd(plan.exit)}
           </dd>
-          <dd className="text-[11px] text-muted-foreground">+{plan.profitPct}%</dd>
+          <dd className="text-[11px] text-muted-foreground">
+            {interpolate(t.rLabel, {
+              r: plan.rMultiple,
+              risk: plan.riskUsd.toFixed(2),
+            })}
+          </dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -258,7 +325,9 @@ function LevelMap({
             {t.placedAt}
           </dt>
           <dd className="font-mono text-base font-semibold">{placed}</dd>
-          <dd className="text-[11px] text-muted-foreground">{signal.priceSource}</dd>
+          <dd className="text-[11px] text-muted-foreground">
+            {t.whalePrint} · {signal.priceSource}
+          </dd>
         </div>
         <div className="space-y-1">
           <dt className="text-xs uppercase tracking-wider text-muted-foreground">

@@ -32,7 +32,11 @@ export function shortenAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
-export function formatAlert(signal: WhaleSignal, language: Language = "fil") {
+export function formatAlert(
+  signal: WhaleSignal,
+  language: Language = "fil",
+  liveUsd?: number | null
+) {
   const t = dictionaries[language];
   const placed = formatUsd(signal.priceUsd);
   const stop =
@@ -53,11 +57,15 @@ export function formatAlert(signal: WhaleSignal, language: Language = "fil") {
     : "Wallet";
   const toLabel = signal.primaryTo.entity ? signal.primaryTo.entity : "Wallet";
 
-  const plan = tradePlanFor(signal);
+  const plan = tradePlanFor(signal, liveUsd);
   const tradeLines = plan
     ? [
-        `${t.entry}: ${formatUsd(plan.entry)} (${t.tradeWhen} ${formatTimestamp(plan.whenUnix)})`,
-        `${t.exit}: ${formatUsd(plan.exit)} (${plan.profitPct}%)`,
+        `${t.entry}: ${formatUsd(plan.entry)}${
+          plan.usedLivePrice
+            ? ` (${t.liveTick} ${formatTimestamp(plan.liveWhenUnix)})`
+            : ` (${t.tradeWhen} ${formatTimestamp(plan.whenUnix)})`
+        }`,
+        `${t.exit}: ${formatUsd(plan.exit)} (${plan.rMultiple}R)`,
         `${t.stopLoss}: ${formatUsd(plan.stop)}`,
       ]
     : [t.watchNotTrade];

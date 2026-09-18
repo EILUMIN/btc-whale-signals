@@ -77,11 +77,20 @@ export function explorerTxUrl(txid: string) {
   return toAbsoluteUrl(`${MEMPOOL_EXPLORER}/tx/${txid}`);
 }
 
-export function signalsApiUrl() {
+function apiUrl(path: string) {
   if (typeof window !== "undefined" && window.location?.origin) {
-    return `${window.location.origin}/api/signals`;
+    return `${window.location.origin}${path}`;
   }
   const origin = appOrigin();
-  if (origin) return `${origin}/api/signals`;
-  return toAbsoluteUrl("/api/signals");
+  if (origin) return `${origin}${path}`;
+  return toAbsoluteUrl(path);
+}
+
+export function signalsApiUrl() {
+  return apiUrl("/api/signals");
+}
+
+/** Live BTC/USD only — does not wait for a mempool scan or whale timestamp. */
+export function priceApiUrl() {
+  return apiUrl("/api/price");
 }
