@@ -1,0 +1,162 @@
+export type Language = "en" | "fil";
+
+export const LANGUAGE_STORAGE_KEY = "btc-whale-lang";
+
+export const dictionaries = {
+  en: {
+    htmlLang: "en",
+    eyebrow: "BTC/USD desk",
+    title: "Whale Signal Desk",
+    subtitle:
+      "Real-time 500+ BTC on-chain moves from Mempool.space, with the price at the exact time of the transfer, plus a BUY/SELL recommendation. Only you can see this — no Telegram or Discord.",
+    livePrice: "Live BTC/USD",
+    whaleThreshold: "Whale threshold",
+    whaleThresholdHint: "Watching transfers above {threshold} BTC",
+    sellShort: "SELL / SHORT",
+    sellHint: "Inflow to an exchange",
+    buyAccum: "BUY / ACCUMULATION",
+    buyHint: "Outflow from an exchange",
+    exchangeWallets: "Exchange wallets",
+    liveWebsocket: "Live mempool websocket",
+    pollingMempool: "Polling mempool",
+    liveFeedConnected: "Live feed connected",
+    connectingLiveFeed: "Connecting live feed",
+    lastScan: "Last scan",
+    pending: "pending",
+    uiRefresh: "UI refresh",
+    rescan: "Scan again",
+    feedError: "Data feed problem: {error}. Retrying.",
+    fetchError: "Could not load signals",
+    whaleAlerts: "Whale alerts",
+    tabAll: "All",
+    emptyTitle: "No {threshold}+ BTC whale move right now",
+    emptyBody:
+      "{threshold} BTC transfers are rare. The mempool and known exchange wallets are being monitored. Alerts appear here with the exact price level when one lands.",
+    liveTape: "Live tape",
+    liveTapeHint:
+      "Largest transfers in the latest scan — not an automatic BUY/SELL until they reach the threshold.",
+    waitingTape: "Waiting for mempool prints…",
+    howToRead: "How to read this",
+    inflowExplain:
+      "Inflow to an exchange → SELL / SHORT SETUP and resistance at the transfer price.",
+    outflowExplain:
+      "Outflow from an exchange to a wallet → BUY / ACCUMULATION and support at the transfer price.",
+    inflow: "Inflow",
+    outflow: "Outflow",
+    timestamp: "Time (Timestamp)",
+    sizeAndMove: "Size and movement",
+    priceLevel: "Price Level",
+    signalRecommendation: "Signal Recommendation",
+    estimatedResistance: "Estimated Resistance",
+    estimatedSupport: "Estimated Support",
+    keyLevel: "Key Level",
+    zone: "zone",
+    from: "From",
+    to: "To",
+    noAddress: "No address data",
+    copyAlert: "Copy alert",
+    copied: "Copied",
+    confirmed: "Confirmed · block {block}",
+    unconfirmed: "Unconfirmed · mempool",
+    walletCold: "Wallet / cold storage",
+    unknownOutput: "Unknown output",
+    language: "Language",
+    english: "English",
+    tagalog: "Tagalog",
+    noteInflow:
+      "Inflow (≥ {threshold} BTC) to an exchange — selling pressure is possible around this price.",
+    noteOutflow:
+      "Outflow (≥ {threshold} BTC) from an exchange to a wallet — accumulation is possible around this price.",
+    noteInternal: "Move between exchange wallets — not a directional buy/sell.",
+    noteUnlabeled:
+      "Large transfer, but the exchange cluster is unidentified. No BUY/SELL until the destination is clear.",
+    movementWalletToExchange: "Wallet to Exchange",
+    movementExchangeToWallet: "Exchange to Wallet",
+    movementExchangeInternal: "Exchange Internal",
+    movementWalletToWallet: "Wallet to Wallet",
+  },
+  fil: {
+    htmlLang: "fil",
+    eyebrow: "BTC/USD desk",
+    title: "Whale Signal Desk",
+    subtitle:
+      "Real-time na 500+ BTC on-chain galaw mula sa Mempool.space, may presyo sa mismong oras ng transaksyon, at BUY/SELL recommendation. Ikaw lang ang makakakita nito — walang Telegram o Discord.",
+    livePrice: "Live BTC/USD",
+    whaleThreshold: "Whale threshold",
+    whaleThresholdHint: "Binabantayan ang transaksyong higit sa {threshold} BTC",
+    sellShort: "SELL / SHORT",
+    sellHint: "Inflow papuntang exchange",
+    buyAccum: "BUY / ACCUMULATION",
+    buyHint: "Outflow palabas ng exchange",
+    exchangeWallets: "Exchange wallets",
+    liveWebsocket: "Live mempool websocket",
+    pollingMempool: "Polling mempool",
+    liveFeedConnected: "Live feed connected",
+    connectingLiveFeed: "Connecting live feed",
+    lastScan: "Last scan",
+    pending: "pending",
+    uiRefresh: "UI refresh",
+    rescan: "I-scan ulit",
+    feedError: "May problema sa data feed: {error}. Patuloy ang retry.",
+    fetchError: "Hindi makuha ang signals",
+    whaleAlerts: "Whale alerts",
+    tabAll: "Lahat",
+    emptyTitle: "Walang {threshold}+ BTC whale move sa ngayon",
+    emptyBody:
+      "Bihira ang {threshold} BTC na galaw. Naka-monitor ang mempool at mga kilalang exchange wallets. Lalabas dito ang alert kapag may dumating, kasama ang exact price level.",
+    liveTape: "Live tape",
+    liveTapeHint:
+      "Pinakamalalaking nakitang transaksyon sa latest scan — hindi ito automatic na BUY/SELL hangga't hindi umabot sa threshold.",
+    waitingTape: "Naghihintay ng mempool prints…",
+    howToRead: "Paano binabasa",
+    inflowExplain:
+      "Inflow papuntang exchange → SELL / SHORT SETUP at resistance sa price level ng transaksyon.",
+    outflowExplain:
+      "Outflow palabas ng exchange papuntang wallet → BUY / ACCUMULATION at support sa price level ng transaksyon.",
+    inflow: "Inflow",
+    outflow: "Outflow",
+    timestamp: "Oras (Timestamp)",
+    sizeAndMove: "Dami at Galaw",
+    priceLevel: "Price Level",
+    signalRecommendation: "Signal Recommendation",
+    estimatedResistance: "Tinatayang Resistance",
+    estimatedSupport: "Tinatayang Support",
+    keyLevel: "Key Level",
+    zone: "zone",
+    from: "Mula (from)",
+    to: "Papunta (to)",
+    noAddress: "Walang address data",
+    copyAlert: "Copy alert",
+    copied: "Copied",
+    confirmed: "Confirmed · block {block}",
+    unconfirmed: "Unconfirmed · mempool",
+    walletCold: "Wallet / cold storage",
+    unknownOutput: "Unknown output",
+    language: "Wika",
+    english: "English",
+    tagalog: "Tagalog",
+    noteInflow:
+      "Inflow (≥ {threshold} BTC) papuntang exchange — posible ang selling pressure sa paligid ng presyong ito.",
+    noteOutflow:
+      "Outflow (≥ {threshold} BTC) palabas ng exchange papuntang wallet — posible ang accumulation sa paligid ng presyong ito.",
+    noteInternal:
+      "Galaw sa pagitan ng exchange wallets — hindi directional buy/sell.",
+    noteUnlabeled:
+      "Malaking transaksyon pero hindi identified ang exchange cluster. Walang BUY/SELL hangga't hindi malinaw ang destination.",
+    movementWalletToExchange: "Wallet papuntang Exchange",
+    movementExchangeToWallet: "Exchange papuntang Wallet",
+    movementExchangeInternal: "Internal sa Exchange",
+    movementWalletToWallet: "Wallet papuntang Wallet",
+  },
+} as const;
+
+export type Dictionary = (typeof dictionaries)[Language];
+
+export function interpolate(
+  template: string,
+  vars: Record<string, string | number>
+) {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) =>
+    String(vars[key] ?? "")
+  );
+}

@@ -1,8 +1,10 @@
 "use client";
 
+import { useLanguage } from "@/components/language-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { interpolate, type Dictionary } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   formatAlert,
@@ -11,11 +13,45 @@ import {
   formatUsd,
   shortenAddress,
 } from "@/lib/format";
-import type { WhaleSignal } from "@/lib/types";
+import type { MovementKind, WhaleSignal } from "@/lib/types";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useState } from "react";
 
+function movementLabel(t: Dictionary, movement: MovementKind) {
+  switch (movement) {
+    case "Wallet to Exchange":
+      return t.movementWalletToExchange;
+    case "Exchange to Wallet":
+      return t.movementExchangeToWallet;
+    case "Exchange Internal":
+      return t.movementExchangeInternal;
+    default:
+      return t.movementWalletToWallet;
+  }
+}
+
+function noteForSignal(t: Dictionary, signal: WhaleSignal) {
+  const vars = { threshold: 500 };
+  switch (signal.keyLevel.noteKey) {
+    case "inflow":
+      return interpolate(t.noteInflow, vars);
+    case "outflow":
+      return interpolate(t.noteOutflow, vars);
+    case "internal":
+      return t.noteInternal;
+    default:
+      return t.noteUnlabeled;
+  }
+}
+
+function addressLabel(t: Dictionary, label: string) {
+  if (label === "Wallet / cold storage") return t.walletCold;
+  if (label === "Unknown output") return t.unknownOutput;
+  return label;
+}
+
 export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
+  const { language, t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const isSell = signal.signal === "SELL";
   const isBuy = signal.signal === "BUY";
@@ -31,17 +67,17 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
       : "bg-amber-500/15 text-amber-200 border-amber-500/30";
 
   async function copyAlert() {
-    await navigator.clipboard.writeText(formatAlert(signal));
+    await navigator.clipboard.writeText(formatAlert(signal, language));
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   }
 
   const levelLabel =
     signal.keyLevel.kind === "resistance"
-      ? "Tinatayang Resistance"
+      ? t.estimatedResistance
       : signal.keyLevel.kind === "support"
-        ? "Tinatayang Support"
-        : "Key Level";
+        ? t.estimatedSupport
+        : t.keyLevel;
 
   return (
     <Card className={`border ${accent} shadow-none`}>
@@ -53,8 +89,10 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {signal.confirmed
-                ? `Confirmed · block ${signal.blockHeight ?? "—"}`
-                : "Unconfirmed · mempool"}
+                ? interpolate(t.confirmed, {
+                    block: signal.blockHeight ?? "—",
+                  })
+                : t.unconfirmed}
             </p>
           </div>
           <Badge className={badgeClass} variant="outline">
@@ -65,22 +103,25 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <div className="space-y-1">
             <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-              Oras (Timestamp)
+              {t.timestamp}
             </dt>
             <dd className="font-mono">{formatTimestamp(signal.timestampUnix)}</dd>
           </div>
           <div className="space-y-1">
             <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-              Dami at Galaw
+              {t.sizeAndMove}
             </dt>
             <dd>
               <span className="font-mono">{formatBtc(signal.btcAmount)}</span>
-              <span className="text-muted-foreground"> · {signal.movement}</span>
+              <span className="text-muted-foreground">
+                {" "}
+                · {movementLabel(t, signal.movement)}
+              </span>
             </dd>
           </div>
           <div className="space-y-1">
             <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-              Price Level
+              {t.priceLevel}
             </dt>
             <dd className="font-mono">
               {formatUsd(signal.priceUsd)}
@@ -91,7 +132,7 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
           </div>
           <div className="space-y-1">
             <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-              Signal Recommendation
+              {t.signalRecommendation}
             </dt>
             <dd className="font-semibold">{signal.recommendation}</dd>
           </div>
@@ -103,26 +144,26 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
               {formatUsd(signal.keyLevel.price)}
               {signal.keyLevel.kind !== "none" && (
                 <span className="ml-2 text-xs text-muted-foreground">
-                  zone {formatUsd(signal.keyLevel.zoneLow)} –{" "}
+                  {t.zone} {formatUsd(signal.keyLevel.zoneLow)} –{" "}
                   {formatUsd(signal.keyLevel.zoneHigh)}
                 </span>
               )}
             </dd>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              {signal.keyLevel.note}
+              {noteForSignal(t, signal)}
             </p>
           </div>
         </dl>
 
         <div className="grid gap-3 rounded-lg border border-border/70 bg-background/40 p-3 text-xs sm:grid-cols-2">
-          <AddressList title="Mula (from)" rows={signal.from} />
-          <AddressList title="Papunta (to)" rows={signal.to} />
+          <AddressList title={t.from} rows={signal.from} t={t} />
+          <AddressList title={t.to} rows={signal.to} t={t} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={copyAlert}>
             {copied ? <Check /> : <Copy />}
-            {copied ? "Copied" : "Copy alert"}
+            {copied ? t.copied : t.copyAlert}
           </Button>
           <a
             href={signal.explorerUrl}
@@ -142,9 +183,11 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
 function AddressList({
   title,
   rows,
+  t,
 }: {
   title: string;
   rows: WhaleSignal["from"];
+  t: Dictionary;
 }) {
   return (
     <div>
@@ -152,14 +195,16 @@ function AddressList({
       <ul className="space-y-2">
         {rows.slice(0, 4).map((row) => (
           <li key={`${title}-${row.address}`} className="leading-snug">
-            <span className="font-medium text-foreground">{row.label}</span>
+            <span className="font-medium text-foreground">
+              {addressLabel(t, row.label)}
+            </span>
             <span className="block font-mono text-muted-foreground">
               {shortenAddress(row.address)} · {formatBtc(row.btc)}
             </span>
           </li>
         ))}
         {rows.length === 0 && (
-          <li className="text-muted-foreground">Walang address data</li>
+          <li className="text-muted-foreground">{t.noAddress}</li>
         )}
       </ul>
     </div>

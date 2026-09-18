@@ -1,5 +1,10 @@
 import { Dashboard } from "@/components/dashboard";
+import { LanguageProvider } from "@/components/language-provider";
 
 export default function Home() {
-  return <Dashboard />;
+  return (
+    <LanguageProvider>
+      <Dashboard />
+    </LanguageProvider>
+  );
 }

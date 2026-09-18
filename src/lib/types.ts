@@ -16,11 +16,14 @@ export type LabeledAddress = {
   btc: number;
 };
 
+export type SignalNoteKey = "inflow" | "outflow" | "internal" | "unlabeled";
+
 export type KeyLevel = {
   kind: "resistance" | "support" | "none";
   price: number;
   zoneLow: number;
   zoneHigh: number;
+  noteKey: SignalNoteKey;
   note: string;
 };
 

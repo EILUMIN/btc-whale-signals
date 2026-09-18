@@ -1,6 +1,7 @@
 import { classifyTransaction } from "../src/lib/classify";
 import { decideSignal } from "../src/lib/signals";
 import type { EsploraTx } from "../src/lib/types";
+import { mempoolUrl } from "../src/lib/urls";
 
 const SATS = 100_000_000;
 
@@ -40,4 +41,12 @@ if (inflow.movement !== "Wallet to Exchange") throw new Error("inflow movement")
 if (outflow.movement !== "Exchange to Wallet") throw new Error("outflow movement");
 if (sell.signal !== "SELL") throw new Error("sell signal");
 if (buy.signal !== "BUY") throw new Error("buy signal");
+if (sell.keyLevel.noteKey !== "inflow") throw new Error("inflow note key");
+if (buy.keyLevel.noteKey !== "outflow") throw new Error("outflow note key");
+
+const recent = mempoolUrl("/mempool/recent");
+if (!recent.startsWith("https://mempool.space/api/mempool/recent")) {
+  throw new Error(`expected absolute mempool URL, got ${recent}`);
+}
+
 console.log("ok");

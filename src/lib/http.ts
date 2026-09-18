@@ -1,4 +1,5 @@
 import { FETCH_TIMEOUT_MS } from "@/lib/constants";
+import { toAbsoluteUrl } from "@/lib/urls";
 
 export class HttpError extends Error {
   constructor(
@@ -16,10 +17,11 @@ export async function fetchJson<T>(
   init: RequestInit = {},
   timeoutMs = FETCH_TIMEOUT_MS
 ): Promise<T> {
+  const absolute = toAbsoluteUrl(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, {
+    const response = await fetch(absolute, {
       ...init,
       signal: controller.signal,
       headers: {
@@ -33,14 +35,14 @@ export async function fetchJson<T>(
       throw new HttpError(
         `${response.status} ${response.statusText}`,
         response.status,
-        url
+        absolute
       );
     }
     return (await response.json()) as T;
   } catch (error) {
     if (error instanceof HttpError) throw error;
     const message = error instanceof Error ? error.message : String(error);
-    throw new HttpError(message, undefined, url);
+    throw new HttpError(message, undefined, absolute);
   } finally {
     clearTimeout(timer);
   }

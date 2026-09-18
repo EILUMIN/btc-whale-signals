@@ -1,32 +1,27 @@
-import {
-  MEMPOOL_API,
-  MEMPOOL_EXPLORER,
-  SATS_PER_BTC,
-} from "@/lib/constants";
+import { SATS_PER_BTC } from "@/lib/constants";
 import { fetchJson, withRetry } from "@/lib/http";
 import type { EsploraTx, MempoolTxPreview } from "@/lib/types";
+import { explorerTxUrl, mempoolUrl, toAbsoluteUrl } from "@/lib/urls";
+
+export { explorerTxUrl };
 
 export function satsToBtc(sats: number) {
   return sats / SATS_PER_BTC;
 }
 
-export function explorerTxUrl(txid: string) {
-  return `${MEMPOOL_EXPLORER}/tx/${txid}`;
-}
-
 export async function fetchMempoolRecent(): Promise<MempoolTxPreview[]> {
   return withRetry(() =>
-    fetchJson<MempoolTxPreview[]>(`${MEMPOOL_API}/mempool/recent`)
+    fetchJson<MempoolTxPreview[]>(mempoolUrl("/mempool/recent"))
   );
 }
 
 export async function fetchTx(txid: string): Promise<EsploraTx> {
-  return withRetry(() => fetchJson<EsploraTx>(`${MEMPOOL_API}/tx/${txid}`));
+  return withRetry(() => fetchJson<EsploraTx>(mempoolUrl(`/tx/${txid}`)));
 }
 
 export async function fetchAddressTxs(address: string): Promise<EsploraTx[]> {
   return withRetry(() =>
-    fetchJson<EsploraTx[]>(`${MEMPOOL_API}/address/${address}/txs`)
+    fetchJson<EsploraTx[]>(mempoolUrl(`/address/${address}/txs`))
   );
 }
 
@@ -35,7 +30,7 @@ export async function fetchTipHash(): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12_000);
     try {
-      const response = await fetch(`${MEMPOOL_API}/blocks/tip/hash`, {
+      const response = await fetch(toAbsoluteUrl(mempoolUrl("/blocks/tip/hash")), {
         signal: controller.signal,
         cache: "no-store",
         headers: { "User-Agent": "btc-whale-signals/1.0 (local dashboard)" },
@@ -59,9 +54,7 @@ export type RecentBlock = {
 };
 
 export async function fetchRecentBlocks(): Promise<RecentBlock[]> {
-  return withRetry(() =>
-    fetchJson<RecentBlock[]>(`${MEMPOOL_API}/v1/blocks`)
-  );
+  return withRetry(() => fetchJson<RecentBlock[]>(mempoolUrl("/v1/blocks")));
 }
 
 export async function fetchBlockTxs(
@@ -70,8 +63,8 @@ export async function fetchBlockTxs(
 ): Promise<EsploraTx[]> {
   const path =
     startIndex > 0
-      ? `${MEMPOOL_API}/block/${hash}/txs/${startIndex}`
-      : `${MEMPOOL_API}/block/${hash}/txs`;
+      ? mempoolUrl(`/block/${hash}/txs/${startIndex}`)
+      : mempoolUrl(`/block/${hash}/txs`);
   return withRetry(() => fetchJson<EsploraTx[]>(path));
 }
 

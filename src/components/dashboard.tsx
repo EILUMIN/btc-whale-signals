@@ -1,13 +1,17 @@
 "use client";
 
+import { LanguageToggle } from "@/components/language-toggle";
 import { WhaleAlertCard } from "@/components/whale-alert-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useLanguage } from "@/components/language-provider";
+import { interpolate } from "@/lib/i18n";
 import { formatBtc, formatUsd, shortenAddress } from "@/lib/format";
 import type { EngineSnapshot, SignalSide } from "@/lib/types";
+import { signalsApiUrl } from "@/lib/urls";
 import {
   Activity,
   ArrowDownToLine,
@@ -20,22 +24,28 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 type Filter = "ALL" | SignalSide;
 
 export function Dashboard() {
+  const { t } = useLanguage();
   const [data, setData] = useState<EngineSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("ALL");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
+  const loadSignals = useCallback(async () => {
+    const response = await fetch(signalsApiUrl(), { cache: "no-store" });
+    const json = (await response.json()) as EngineSnapshot;
+    if (!response.ok && !json.signals) {
+      throw new Error(json.error || t.fetchError);
+    }
+    return json;
+  }, [t.fetchError]);
+
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
       try {
-        const response = await fetch("/api/signals", { cache: "no-store" });
-        const json = (await response.json()) as EngineSnapshot;
+        const json = await loadSignals();
         if (cancelled) return;
-        if (!response.ok && !json.signals) {
-          throw new Error(json.error || "Hindi makuha ang signals");
-        }
         setData(json);
         setError(json.error);
         setUpdatedAt(new Date().toISOString());
@@ -54,16 +64,12 @@ export function Dashboard() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, []);
+  }, [loadSignals]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/signals", { cache: "no-store" });
-      const json = (await response.json()) as EngineSnapshot;
-      if (!response.ok && !json.signals) {
-        throw new Error(json.error || "Hindi makuha ang signals");
-      }
+      const json = await loadSignals();
       setData(json);
       setError(json.error);
       setUpdatedAt(new Date().toISOString());
@@ -72,7 +78,7 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadSignals]);
 
   const signals = useMemo(() => {
     const rows = data?.signals ?? [];
@@ -83,99 +89,105 @@ export function Dashboard() {
   const price = data?.price;
   const change = price?.change24hPct;
   const changeUp = (change ?? 0) >= 0;
+  const threshold = data?.thresholdBtc ?? 500;
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="space-y-2">
+      <header className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-400">
-            Local BTC/USD desk
+            {t.eyebrow}
           </p>
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            Whale Signal Desk
-          </h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Real-time na 500+ BTC on-chain galaw mula sa Mempool.space, may
-            presyo sa mismong oras ng transaksyon, at BUY/SELL recommendation.
-            Ikaw lang ang makakakita nito — walang Telegram o Discord.
-          </p>
+          <LanguageToggle />
         </div>
-        <div className="rounded-xl border border-amber-500/20 bg-card px-4 py-3">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">
-            Live BTC/USD
-          </p>
-          {price ? (
-            <>
-              <p className="font-mono text-3xl font-semibold">
-                {formatUsd(price.usd)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {price.source}
-                {change !== null && change !== undefined && (
-                  <span
-                    className={
-                      changeUp ? " ml-2 text-emerald-400" : " ml-2 text-red-400"
-                    }
-                  >
-                    {changeUp ? "+" : ""}
-                    {change.toFixed(2)}% 24h
-                  </span>
-                )}
-              </p>
-            </>
-          ) : (
-            <Skeleton className="mt-2 h-9 w-40" />
-          )}
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+              {t.title}
+            </h1>
+            <p className="max-w-2xl text-sm text-muted-foreground">{t.subtitle}</p>
+          </div>
+          <div className="rounded-xl border border-amber-500/20 bg-card px-4 py-3">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">
+              {t.livePrice}
+            </p>
+            {price ? (
+              <>
+                <p className="font-mono text-3xl font-semibold">
+                  {formatUsd(price.usd)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {price.source}
+                  {change !== null && change !== undefined && (
+                    <span
+                      className={
+                        changeUp ? " ml-2 text-emerald-400" : " ml-2 text-red-400"
+                      }
+                    >
+                      {changeUp ? "+" : ""}
+                      {change.toFixed(2)}% 24h
+                    </span>
+                  )}
+                </p>
+              </>
+            ) : (
+              <Skeleton className="mt-2 h-9 w-40" />
+            )}
+          </div>
         </div>
       </header>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Whale threshold"
-          value={`${data?.thresholdBtc ?? 500} BTC`}
-          hint="Binabantayan ang transaksyong higit sa 500 BTC"
+          label={t.whaleThreshold}
+          value={`${threshold} BTC`}
+          hint={interpolate(t.whaleThresholdHint, { threshold })}
         />
         <StatCard
-          label="SELL / SHORT"
+          label={t.sellShort}
           value={String(data?.stats.sell ?? 0)}
-          hint="Inflow papuntang exchange"
+          hint={t.sellHint}
           tone="sell"
         />
         <StatCard
-          label="BUY / ACCUMULATION"
+          label={t.buyAccum}
           value={String(data?.stats.buy ?? 0)}
-          hint="Outflow palabas ng exchange"
+          hint={t.buyHint}
           tone="buy"
         />
         <StatCard
-          label="Exchange wallets"
+          label={t.exchangeWallets}
           value={String(data?.trackedWallets ?? 0)}
-          hint={data?.liveFeed ? "Live mempool websocket" : "Polling mempool"}
+          hint={data?.liveFeed ? t.liveWebsocket : t.pollingMempool}
         />
       </section>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-300">
           <Radio className="size-3" />
-          {data?.liveFeed ? "Live feed connected" : "Connecting live feed"}
+          {data?.liveFeed ? t.liveFeedConnected : t.connectingLiveFeed}
         </Badge>
         <span>
-          Last scan:{" "}
+          {t.lastScan}:{" "}
           {data?.lastScanAt
             ? new Date(data.lastScanAt).toLocaleTimeString()
-            : "pending"}
+            : t.pending}
         </span>
-        {updatedAt && <span>UI refresh: {new Date(updatedAt).toLocaleTimeString()}</span>}
+        {updatedAt && (
+          <span>
+            {t.uiRefresh}: {new Date(updatedAt).toLocaleTimeString()}
+          </span>
+        )}
         <Button size="sm" variant="ghost" onClick={() => void refresh()}>
           <RefreshCw className={loading ? "animate-spin" : ""} />
-          I-scan ulit
+          {t.rescan}
         </Button>
       </div>
 
       {error && (
         <Card className="border-red-500/40 bg-red-500/10 shadow-none">
           <CardContent className="pt-1 text-sm text-red-200">
-            May problema sa data feed: {error}. Patuloy ang retry.
+            {interpolate(t.feedError, { error })}
           </CardContent>
         </Card>
       )}
@@ -183,7 +195,7 @@ export function Dashboard() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
         <section className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-medium">Whale alerts</h2>
+            <h2 className="text-lg font-medium">{t.whaleAlerts}</h2>
             <Tabs
               value={filter}
               onValueChange={(value) => {
@@ -198,7 +210,7 @@ export function Dashboard() {
               }}
             >
               <TabsList>
-                <TabsTrigger value="ALL">Lahat</TabsTrigger>
+                <TabsTrigger value="ALL">{t.tabAll}</TabsTrigger>
                 <TabsTrigger value="BUY">BUY</TabsTrigger>
                 <TabsTrigger value="SELL">SELL</TabsTrigger>
                 <TabsTrigger value="WATCH">WATCH</TabsTrigger>
@@ -218,12 +230,10 @@ export function Dashboard() {
               <CardContent className="space-y-2 py-10 text-center">
                 <Activity className="mx-auto size-8 text-amber-400" />
                 <p className="font-medium">
-                  Walang {data?.thresholdBtc ?? 500}+ BTC whale move sa ngayon
+                  {interpolate(t.emptyTitle, { threshold })}
                 </p>
                 <p className="mx-auto max-w-md text-sm text-muted-foreground">
-                  Bihira ang 500 BTC na galaw. Naka-monitor ang mempool at mga
-                  kilalang exchange wallets. Lalabas dito ang alert kapag
-                  may dumating, kasama ang exact price level.
+                  {interpolate(t.emptyBody, { threshold })}
                 </p>
               </CardContent>
             </Card>
@@ -239,17 +249,12 @@ export function Dashboard() {
         <aside className="space-y-4">
           <Card className="shadow-none">
             <CardHeader>
-              <CardTitle className="text-sm">Live tape</CardTitle>
+              <CardTitle className="text-sm">{t.liveTape}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <p className="text-xs text-muted-foreground">
-                Pinakamalalaking nakitang transaksyon sa latest scan — hindi
-                ito automatic na BUY/SELL hangga&apos;t hindi umabot sa threshold.
-              </p>
+              <p className="text-xs text-muted-foreground">{t.liveTapeHint}</p>
               {(data?.tape ?? []).length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Naghihintay ng mempool prints…
-                </p>
+                <p className="text-sm text-muted-foreground">{t.waitingTape}</p>
               )}
               <ul className="space-y-2">
                 {(data?.tape ?? []).slice(0, 10).map((print) => (
@@ -260,7 +265,7 @@ export function Dashboard() {
                     <span>{shortenAddress(print.txid)}</span>
                     <span
                       className={
-                        print.btc >= (data?.thresholdBtc ?? 500)
+                        print.btc >= threshold
                           ? "text-amber-300"
                           : "text-muted-foreground"
                       }
@@ -275,23 +280,21 @@ export function Dashboard() {
 
           <Card className="shadow-none">
             <CardHeader>
-              <CardTitle className="text-sm">Paano binabasa</CardTitle>
+              <CardTitle className="text-sm">{t.howToRead}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <p className="flex gap-2">
                 <ArrowDownToLine className="mt-0.5 size-4 text-red-400" />
                 <span>
-                  <strong className="text-foreground">Inflow</strong> papuntang
-                  exchange → SELL / SHORT SETUP at resistance sa price level ng
-                  transaksyon.
+                  <strong className="text-foreground">{t.inflow}</strong>
+                  {` ${t.inflowExplain}`}
                 </span>
               </p>
               <p className="flex gap-2">
                 <ArrowUpFromLine className="mt-0.5 size-4 text-emerald-400" />
                 <span>
-                  <strong className="text-foreground">Outflow</strong> palabas ng
-                  exchange papuntang wallet → BUY / ACCUMULATION at support sa
-                  price level ng transaksyon.
+                  <strong className="text-foreground">{t.outflow}</strong>
+                  {` ${t.outflowExplain}`}
                 </span>
               </p>
             </CardContent>

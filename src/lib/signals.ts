@@ -34,7 +34,8 @@ export function decideSignal(
         price: resistance,
         zoneLow: resistance,
         zoneHigh: roundPrice(resistance + buffer),
-        note: `Inflow (≥ ${thresholdBtc} BTC) papuntang exchange — posible ang selling pressure sa paligid ng presyong ito.`,
+        noteKey: "inflow",
+        note: `Inflow (≥ ${thresholdBtc} BTC) to an exchange — selling pressure is possible around this price.`,
       },
     };
   }
@@ -49,7 +50,8 @@ export function decideSignal(
         price: support,
         zoneLow: roundPrice(support - buffer),
         zoneHigh: support,
-        note: `Outflow (≥ ${thresholdBtc} BTC) palabas ng exchange papuntang wallet — posible ang accumulation sa paligid ng presyong ito.`,
+        noteKey: "outflow",
+        note: `Outflow (≥ ${thresholdBtc} BTC) from an exchange to a wallet — accumulation is possible around this price.`,
       },
     };
   }
@@ -63,7 +65,8 @@ export function decideSignal(
         price: roundPrice(priceUsd),
         zoneLow: roundPrice(priceUsd),
         zoneHigh: roundPrice(priceUsd),
-        note: "Galaw sa pagitan ng exchange wallets — hindi directional buy/sell.",
+        noteKey: "internal",
+        note: "Move between exchange wallets — not a directional buy/sell.",
       },
     };
   }
@@ -76,7 +79,8 @@ export function decideSignal(
       price: roundPrice(priceUsd),
       zoneLow: roundPrice(priceUsd),
       zoneHigh: roundPrice(priceUsd),
-      note: "Malaking transaksyon pero hindi identified ang exchange cluster. Walang BUY/SELL hangga't hindi malinaw ang destination.",
+      noteKey: "unlabeled",
+      note: "Large transfer, but the exchange cluster is unidentified. No BUY/SELL until the destination is clear.",
     },
   };
 }

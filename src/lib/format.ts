@@ -1,3 +1,4 @@
+import { dictionaries, type Language } from "@/lib/i18n";
 import type { WhaleSignal } from "@/lib/types";
 
 function pad(value: number) {
@@ -30,13 +31,14 @@ export function shortenAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
-export function formatAlert(signal: WhaleSignal) {
+export function formatAlert(signal: WhaleSignal, language: Language = "fil") {
+  const t = dictionaries[language];
   const levelLine =
     signal.keyLevel.kind === "resistance"
-      ? `Tinatayang Resistance: ${formatUsd(signal.keyLevel.price)} (zone ${formatUsd(signal.keyLevel.zoneLow)} – ${formatUsd(signal.keyLevel.zoneHigh)})`
+      ? `${t.estimatedResistance}: ${formatUsd(signal.keyLevel.price)} (${t.zone} ${formatUsd(signal.keyLevel.zoneLow)} – ${formatUsd(signal.keyLevel.zoneHigh)})`
       : signal.keyLevel.kind === "support"
-        ? `Tinatayang Support: ${formatUsd(signal.keyLevel.price)} (zone ${formatUsd(signal.keyLevel.zoneLow)} – ${formatUsd(signal.keyLevel.zoneHigh)})`
-        : `Key Level: ${formatUsd(signal.keyLevel.price)}`;
+        ? `${t.estimatedSupport}: ${formatUsd(signal.keyLevel.price)} (${t.zone} ${formatUsd(signal.keyLevel.zoneLow)} – ${formatUsd(signal.keyLevel.zoneHigh)})`
+        : `${t.keyLevel}: ${formatUsd(signal.keyLevel.price)}`;
 
   const fromLabel = signal.primaryFrom.entity
     ? signal.primaryFrom.entity
@@ -45,10 +47,10 @@ export function formatAlert(signal: WhaleSignal) {
 
   return [
     "🚨 BTC WHALE ALERT 🚨",
-    `Oras (Timestamp): ${formatTimestamp(signal.timestampUnix)}`,
-    `Dami at Galaw: ${formatBtc(signal.btcAmount)} · ${signal.movement} (${fromLabel} → ${toLabel})`,
-    `Price Level: ${formatUsd(signal.priceUsd)}`,
-    `Signal Recommendation: ${signal.recommendation}`,
+    `${t.timestamp}: ${formatTimestamp(signal.timestampUnix)}`,
+    `${t.sizeAndMove}: ${formatBtc(signal.btcAmount)} · ${signal.movement} (${fromLabel} → ${toLabel})`,
+    `${t.priceLevel}: ${formatUsd(signal.priceUsd)}`,
+    `${t.signalRecommendation}: ${signal.recommendation}`,
     levelLine,
   ].join("\n");
 }
