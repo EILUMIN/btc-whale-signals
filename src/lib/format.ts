@@ -1,5 +1,4 @@
 import { dictionaries, type Language } from "@/lib/i18n";
-import { tradePlanFor } from "@/lib/trade-plan";
 import type { WhaleSignal } from "@/lib/types";
 
 function pad(value: number) {
@@ -34,51 +33,19 @@ export function shortenAddress(address: string) {
 
 export function formatAlert(
   signal: WhaleSignal,
-  language: Language = "fil",
-  liveUsd?: number | null
+  language: Language = "fil"
 ) {
   const t = dictionaries[language];
-  const placed = formatUsd(signal.priceUsd);
-  const stop =
-    signal.keyLevel.kind === "resistance"
-      ? formatUsd(signal.keyLevel.zoneHigh)
-      : signal.keyLevel.kind === "support"
-        ? formatUsd(signal.keyLevel.zoneLow)
-        : placed;
-  const stopLine =
-    signal.keyLevel.kind === "resistance"
-      ? `${t.stopsAt}: ${stop} (${t.estimatedResistance})`
-      : signal.keyLevel.kind === "support"
-        ? `${t.stopsAt}: ${stop} (${t.estimatedSupport})`
-        : `${t.stopsAt}: ${t.watchNoStop}`;
-
   const fromLabel = signal.primaryFrom.entity
     ? signal.primaryFrom.entity
     : "Wallet";
   const toLabel = signal.primaryTo.entity ? signal.primaryTo.entity : "Wallet";
-
-  const plan = tradePlanFor(signal, liveUsd);
-  const tradeLines = plan
-    ? [
-        `${t.entry}: ${formatUsd(plan.entry)}${
-          plan.usedLivePrice
-            ? ` (${t.liveTick} ${formatTimestamp(plan.liveWhenUnix)})`
-            : ` (${t.tradeWhen} ${formatTimestamp(plan.whenUnix)})`
-        }`,
-        `${t.exit}: ${formatUsd(plan.exit)} (${plan.rMultiple}R)`,
-        `${t.stopLoss}: ${formatUsd(plan.stop)}`,
-      ]
-    : [t.watchNotTrade];
-
   return [
     "🚨 BTC WHALE ALERT 🚨",
-    `${t.signalRecommendation}: ${signal.recommendation}`,
-    `${t.sizeAndMove}: ${formatBtc(signal.btcAmount)} · ${signal.movement} (${fromLabel} → ${toLabel})`,
-    ...tradeLines,
-    `${t.placedWhen}: ${formatTimestamp(signal.timestampUnix)}`,
-    `${t.placedAt}: ${placed}`,
-    stopLine,
-    `${t.zone}: ${formatUsd(signal.keyLevel.zoneLow)} – ${formatUsd(signal.keyLevel.zoneHigh)}`,
+    `${t.m1Signal}: ${signal.recommendation}`,
+    `${formatBtc(signal.btcAmount)} · ${signal.movement} (${fromLabel} → ${toLabel})`,
+    `${t.livePrice}: ${formatUsd(signal.priceUsd)}`,
+    `${t.candle}: ${formatTimestamp(signal.timestampUnix)}`,
   ].join("\n");
 }
 
@@ -101,15 +68,10 @@ export function formatAlertTerminal(signal: WhaleSignal) {
         : ANSI.yellow;
   return [
     `${color}${ANSI.bold}🚨 BTC WHALE ALERT 🚨${ANSI.reset}`,
-    `${ANSI.dim}Oras (Timestamp):${ANSI.reset} ${formatTimestamp(signal.timestampUnix)}`,
-    `${ANSI.dim}Dami at Galaw:${ANSI.reset} ${formatBtc(signal.btcAmount)} · ${signal.movement}`,
-    `${ANSI.dim}Price Level:${ANSI.reset} ${formatUsd(signal.priceUsd)} (${signal.priceSource})`,
-    `${ANSI.dim}Signal Recommendation:${ANSI.reset} ${color}${ANSI.bold}${signal.recommendation}${ANSI.reset}`,
-    signal.keyLevel.kind === "resistance"
-      ? `${ANSI.dim}Saan nila nilagay:${ANSI.reset} ${formatUsd(signal.priceUsd)}\n${ANSI.dim}Hanggang saan hihinto:${ANSI.reset} ${formatUsd(signal.keyLevel.zoneHigh)}`
-      : signal.keyLevel.kind === "support"
-        ? `${ANSI.dim}Saan nila nilagay:${ANSI.reset} ${formatUsd(signal.priceUsd)}\n${ANSI.dim}Hanggang saan hihinto:${ANSI.reset} ${formatUsd(signal.keyLevel.zoneLow)}`
-        : `${ANSI.dim}Key Level:${ANSI.reset} ${formatUsd(signal.keyLevel.price)}`,
+    `${ANSI.dim}Time:${ANSI.reset} ${formatTimestamp(signal.timestampUnix)}`,
+    `${ANSI.dim}Size:${ANSI.reset} ${formatBtc(signal.btcAmount)} · ${signal.movement}`,
+    `${ANSI.dim}Price:${ANSI.reset} ${formatUsd(signal.priceUsd)} (${signal.priceSource})`,
+    `${ANSI.dim}Signal:${ANSI.reset} ${color}${ANSI.bold}${signal.recommendation}${ANSI.reset}`,
     `${ANSI.cyan}Tx:${ANSI.reset} ${signal.explorerUrl}`,
   ].join("\n");
 }

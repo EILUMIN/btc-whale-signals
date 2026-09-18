@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Whale Signal Desk · BTC/USD",
   description:
-    "BTC/USD desk: public CCXT books from Binance, Coinbase, and Kraken. Live RSI/ATR lock, 1:3 VWAP take-profit, $1,000 1% position size.",
+    "BTC/USD M1 whale desk: Mempool.space on-chain flows plus public CCXT order-book walls from Binance, Coinbase, and Kraken. 1:3 VWAP take-profit, $1,000 1% risk.",
   applicationName: "Whale Signal Desk",
   manifest: "/manifest.webmanifest",
   appleWebApp: {

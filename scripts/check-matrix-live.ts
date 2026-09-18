@@ -1,20 +1,26 @@
-import { getMatrixSnapshot } from "../src/lib/ccxt-engine";
+import { getM1Snapshot } from "../src/lib/m1-engine";
 
 async function main() {
-  const s = await getMatrixSnapshot();
+  const s = await getM1Snapshot({ skipSpoofDelay: true });
   console.log(
     JSON.stringify(
       {
         ok: s.ok,
         error: s.error,
-        live_rsi: s.live_rsi,
-        live_atr: s.live_atr,
-        live_vwap: s.live_vwap,
+        timeframe: s.timeframe,
         live_price: s.live_price,
+        live_vwap: s.live_vwap,
+        cvd: s.cvd,
         signal: s.signal,
-        lock: s.lockText,
-        venues: s.venues.map((v) => ({ n: v.name, ok: v.ok, last: v.last })),
-        sell: s.sellPlan,
+        inflows: s.flow.inflows,
+        outflows: s.flow.outflows,
+        walls: s.walls.slice(0, 6).map((w) => ({
+          side: w.side,
+          price: w.price,
+          btc: w.btc,
+          whale: w.whale,
+        })),
+        venues: s.venues,
         source: s.source,
       },
       null,

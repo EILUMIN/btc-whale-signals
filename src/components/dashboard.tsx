@@ -1,6 +1,7 @@
 "use client";
 
 import { LanguageToggle } from "@/components/language-toggle";
+import { M1Chart } from "@/components/m1-chart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,13 +9,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useLanguage } from "@/components/language-provider";
 import { interpolate, type Dictionary } from "@/lib/i18n";
 import { formatBtc, formatTimestamp, formatUsd } from "@/lib/format";
-import type { MatrixSnapshot, RiskPlan } from "@/lib/matrix";
+import type { M1Snapshot, RiskPlan, WhaleWall } from "@/lib/m1";
 import { matrixApiUrl, priceApiUrl } from "@/lib/urls";
 import type { LivePrice } from "@/lib/types";
-import { Radio, RefreshCw, ShieldAlert, Volume2 } from "lucide-react";
+import { Radio, RefreshCw, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-function playSellPing() {
+function playSignalPing() {
   const AudioCtx =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext?: typeof AudioContext })
@@ -39,18 +40,18 @@ function playSellPing() {
 
 export function Dashboard() {
   const { t } = useLanguage();
-  const [data, setData] = useState<MatrixSnapshot | null>(null);
+  const [data, setData] = useState<M1Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
   const [soundReady, setSoundReady] = useState(false);
-  const prevSignal = useRef<string>("WAIT");
+  const lastPingCandle = useRef<number | null>(null);
 
-  const loadMatrix = useCallback(async () => {
+  const loadSnapshot = useCallback(async () => {
     const response = await fetch(matrixApiUrl(), { cache: "no-store" });
-    const json = (await response.json()) as MatrixSnapshot;
-    if (!response.ok && !json.live_rsi) {
+    const json = (await response.json()) as M1Snapshot;
+    if (!response.ok && !json.ok) {
       throw new Error(json.error || t.fetchError);
     }
     return json;
@@ -60,21 +61,23 @@ export function Dashboard() {
     let cancelled = false;
     const tick = async () => {
       try {
-        const json = await loadMatrix();
+        const json = await loadSnapshot();
         if (cancelled) return;
         setData(json);
         setError(json.error);
         setUpdatedAt(new Date().toISOString());
-        const fromHold =
-          prevSignal.current === "HOLD" || Boolean(json.alertPing);
-        if (fromHold && json.signal === "SELL") {
+        const pingThisCandle =
+          Boolean(json.alertPing) &&
+          (json.signal === "BUY" || json.signal === "SELL") &&
+          lastPingCandle.current !== json.candleKey;
+        if (pingThisCandle) {
+          lastPingCandle.current = json.candleKey;
           try {
-            playSellPing();
+            playSignalPing();
           } catch {
-            // autoplay may need a click; Enable sound covers that
+            // autoplay may need a click
           }
         }
-        prevSignal.current = json.signal;
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -83,12 +86,12 @@ export function Dashboard() {
       }
     };
     void tick();
-    const timer = setInterval(() => void tick(), 10_000);
+    const timer = setInterval(() => void tick(), 15_000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [loadMatrix]);
+  }, [loadSnapshot]);
 
   useEffect(() => {
     const unlock = () => {
@@ -123,7 +126,7 @@ export function Dashboard() {
           setLivePrice(json);
         }
       } catch {
-        // matrix VWAP remains the source of truth for trades
+        // VWAP remains the trade clock
       }
     };
     void tickPrice();
@@ -137,7 +140,7 @@ export function Dashboard() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const json = await loadMatrix();
+      const json = await loadSnapshot();
       setData(json);
       setError(json.error);
       setUpdatedAt(new Date().toISOString());
@@ -146,10 +149,9 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [loadMatrix]);
+  }, [loadSnapshot]);
 
   const headerPrice = livePrice?.usd ?? data?.live_price ?? data?.live_vwap ?? 0;
-  const locked = Boolean(data?.breakoutLock);
   const signal = data?.signal ?? "WAIT";
 
   return (
@@ -197,16 +199,12 @@ export function Dashboard() {
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label={t.liveRsi}
-          value={data ? data.live_rsi.toFixed(2) : "—"}
-          hint={`prev ${data ? data.rsi_prev.toFixed(2) : "—"}`}
-          tone={locked || (data?.live_rsi ?? 0) > 75 ? "sell" : undefined}
-        />
-        <StatCard
-          label={t.liveAtr}
-          value={data ? formatUsd(data.live_atr) : "—"}
-          hint="Lock if ATR > $150 and RSI > 75"
-          tone={(data?.live_atr ?? 0) > 150 ? "sell" : undefined}
+          label={t.liveCvd}
+          value={data ? data.cvd.toFixed(2) : "—"}
+          hint={data?.cvdLabel ?? t.waitHint}
+          tone={
+            (data?.cvd ?? 0) > 0 ? "buy" : (data?.cvd ?? 0) < 0 ? "sell" : undefined
+          }
         />
         <StatCard
           label={t.liveVwap}
@@ -214,46 +212,26 @@ export function Dashboard() {
           hint={data?.source ?? t.venues}
         />
         <StatCard
-          label={t.matrixSignal}
-          value={locked ? t.holding : signal}
+          label={t.onchainIn}
+          value={data ? formatBtc(data.flow.inflows) : "—"}
+          hint={t.sellHint}
+          tone={(data?.flow.inflows ?? 0) >= 500 ? "sell" : undefined}
+        />
+        <StatCard
+          label={t.m1Signal}
+          value={signal}
           hint={
-            locked
-              ? t.breakoutHold
-              : signal === "SELL"
-                ? t.sellHint
-                : signal === "BUY"
-                  ? t.buyHint
-                  : t.waitingExhaustion
+            signal === "SELL"
+              ? t.sellHint
+              : signal === "BUY"
+                ? t.buyHint
+                : t.waitHint
           }
           tone={
-            locked || signal === "HOLD"
-              ? "sell"
-              : signal === "BUY"
-                ? "buy"
-                : signal === "SELL"
-                  ? "sell"
-                  : undefined
+            signal === "BUY" ? "buy" : signal === "SELL" ? "sell" : undefined
           }
         />
       </section>
-
-      {locked && (
-        <Card className="border-red-500/50 bg-red-500/15 shadow-none">
-          <CardContent className="flex items-start gap-3 pt-1">
-            <ShieldAlert className="mt-0.5 size-6 text-red-300" />
-            <div>
-              <p className="text-lg font-bold tracking-wide text-red-100">
-                {t.breakoutHold}
-              </p>
-              <p className="mt-1 text-sm text-red-100/80">{t.breakoutHint}</p>
-              <p className="mt-1 font-mono text-xs text-red-200">
-                live_rsi={data?.live_rsi.toFixed(2)} · live_atr=
-                {formatUsd(data?.live_atr ?? 0)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge
@@ -263,6 +241,7 @@ export function Dashboard() {
           <Radio className="size-3" />
           {data?.source || t.connectingLiveFeed}
         </Badge>
+        <Badge variant="outline">{t.m1Label}</Badge>
         <Badge variant="outline" className="gap-1">
           <Volume2 className="size-3" />
           {soundReady ? t.soundReady : t.emailIdle}
@@ -279,6 +258,12 @@ export function Dashboard() {
           <span className="text-red-300">
             {interpolate(t.emailFailed, { detail: data.emailDetail ?? "" })}
           </span>
+        )}
+        {data?.spoofChecked && data.spoofCleared && (
+          <span className="text-emerald-300">{t.spoofOk}</span>
+        )}
+        {data?.spoofChecked && !data.spoofCleared && (
+          <span className="text-amber-300">{t.spoofFail}</span>
         )}
         <span>
           {t.lastScan}:{" "}
@@ -307,7 +292,7 @@ export function Dashboard() {
 
       {loading && !data && (
         <div className="space-y-3">
-          <Skeleton className="h-48 w-full" />
+          <Skeleton className="h-64 w-full" />
           <Skeleton className="h-48 w-full" />
         </div>
       )}
@@ -315,19 +300,25 @@ export function Dashboard() {
       {data && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
           <section className="space-y-4">
-            <ArmedTicket data={data} t={t} locked={locked} />
-            <SizerCard
-              title={`${t.positionSizer} · SELL`}
-              plan={data.sellPlan}
-              t={t}
-              active={data.signal === "SELL" && !locked}
-            />
-            <SizerCard
-              title={`${t.positionSizer} · BUY`}
-              plan={data.buyPlan}
-              t={t}
-              active={data.signal === "BUY" && !locked}
-            />
+            <Card className="shadow-none">
+              <CardHeader>
+                <CardTitle className="text-sm">{t.chartTitle}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <M1Chart
+                  bars={data.bars}
+                  walls={data.walls}
+                  live={livePrice?.usd ?? data.live_price}
+                  vwap={data.live_vwap}
+                  entry={data.armedPlan?.entry}
+                  stop={data.armedPlan?.stop}
+                  takeProfit={data.armedPlan?.takeProfit}
+                />
+                <p className="text-xs text-muted-foreground">{t.chartHint}</p>
+              </CardContent>
+            </Card>
+            <ArmedTicket data={data} t={t} />
+            <WallList walls={data.walls} t={t} />
           </section>
           <aside className="space-y-4">
             <Card className="shadow-none">
@@ -351,18 +342,19 @@ export function Dashboard() {
                   </div>
                 ))}
                 <p className="text-xs text-muted-foreground">
-                  Near-touch bids {data.bidsNear.toFixed(2)} BTC · asks{" "}
-                  {data.asksNear.toFixed(2)} BTC
+                  {t.onchainOut}: {formatBtc(data.flow.outflows)}
                 </p>
               </CardContent>
             </Card>
+            <FlowTape data={data} t={t} />
             <Card className="shadow-none">
               <CardHeader>
                 <CardTitle className="text-sm">{t.howToRead}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>{t.waitingExhaustion}</p>
-                <p>{t.breakoutHint}</p>
+                <p>{t.inflowExplain}</p>
+                <p>{t.outflowExplain}</p>
+                <p>{t.spoofExplain}</p>
                 <p>{t.profitNote}</p>
               </CardContent>
             </Card>
@@ -373,23 +365,13 @@ export function Dashboard() {
   );
 }
 
-function ArmedTicket({
-  data,
-  t,
-  locked,
-}: {
-  data: MatrixSnapshot;
-  t: Dictionary;
-  locked: boolean;
-}) {
+function ArmedTicket({ data, t }: { data: M1Snapshot; t: Dictionary }) {
   const plan = data.armedPlan;
-  if (locked || !plan) {
+  if (!plan || (data.signal !== "BUY" && data.signal !== "SELL")) {
     return (
       <Card className="border-amber-500/40 bg-amber-500/10 shadow-none">
         <CardContent className="space-y-2 pt-1">
-          <p className="text-sm font-semibold">
-            {locked ? t.breakoutHold : t.waiting}
-          </p>
+          <p className="text-sm font-semibold">{t.waiting}</p>
           <p className="text-sm text-muted-foreground">{data.recommendation}</p>
         </CardContent>
       </Card>
@@ -430,29 +412,81 @@ function ArmedTicket({
   );
 }
 
-function SizerCard({
-  title,
-  plan,
-  t,
-  active,
-}: {
-  title: string;
-  plan: RiskPlan | null;
-  t: Dictionary;
-  active: boolean;
-}) {
-  if (!plan) return null;
+function WallList({ walls, t }: { walls: WhaleWall[]; t: Dictionary }) {
   return (
-    <Card
-      className={`shadow-none ${
-        active ? "border-amber-400/50" : "border-border/60"
-      }`}
-    >
+    <Card className="shadow-none">
       <CardHeader>
-        <CardTitle className="text-sm">{title}</CardTitle>
+        <CardTitle className="text-sm">{t.wallsTitle}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <PlanGrid plan={plan} t={t} />
+      <CardContent className="space-y-2">
+        {walls.length === 0 && (
+          <p className="text-sm text-muted-foreground">{t.wallsEmpty}</p>
+        )}
+        {walls.slice(0, 8).map((wall) => (
+          <div
+            key={`${wall.side}-${wall.price}`}
+            className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm ${
+              wall.side === "ask"
+                ? "border-red-500/30 bg-red-500/5"
+                : "border-emerald-500/30 bg-emerald-500/5"
+            }`}
+          >
+            <div>
+              <p className="font-medium">
+                {wall.whale ? t.whaleWall : t.notableWall} ·{" "}
+                {wall.side === "ask" ? t.asks : t.bids}
+              </p>
+              <p className="font-mono text-xs text-muted-foreground">
+                {formatUsd(wall.priceLow)} – {formatUsd(wall.priceHigh)} ·{" "}
+                {wall.venues.join(", ")}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="font-mono font-semibold">{formatUsd(wall.price)}</p>
+              <p className="text-xs text-muted-foreground">
+                {formatBtc(wall.btc)}
+              </p>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FlowTape({ data, t }: { data: M1Snapshot; t: Dictionary }) {
+  return (
+    <Card className="shadow-none">
+      <CardHeader>
+        <CardTitle className="text-sm">{t.flowTitle}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {data.flow.prints.length === 0 && (
+          <p className="text-muted-foreground">{t.flowEmpty}</p>
+        )}
+        {data.flow.prints.slice(0, 8).map((print) => (
+          <div
+            key={print.txid}
+            className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5"
+          >
+            <span
+              className={
+                print.kind === "inflow"
+                  ? "text-red-300"
+                  : print.kind === "outflow"
+                    ? "text-emerald-300"
+                    : "text-muted-foreground"
+              }
+            >
+              {print.kind === "inflow"
+                ? t.inflow
+                : print.kind === "outflow"
+                  ? t.outflow
+                  : print.kind}
+            </span>
+            <span className="font-mono text-xs">{formatBtc(print.btc)}</span>
+          </div>
+        ))}
       </CardContent>
     </Card>
   );
@@ -479,7 +513,7 @@ function PlanGrid({ plan, t }: { plan: RiskPlan; t: Dictionary }) {
       </div>
       <div>
         <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-          {t.stopAtr}
+          {t.stopWall}
         </dt>
         <dd className="font-mono text-xl font-semibold text-red-300">
           {formatUsd(plan.stop)}

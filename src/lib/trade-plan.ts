@@ -2,10 +2,10 @@ import { roundPrice } from "@/lib/price";
 import type { WhaleSignal } from "@/lib/types";
 
 /**
- * Take-profit is 90% of a 3R move from entry→stop.
+ * Take-profit is a hard 1:3 from entry→stop.
  * It is NOT 90% of Bitcoin's spot price (that bug printed $6,493 on a $65k short).
  */
-export const TAKE_PROFIT_PCT = 0.9;
+export const TAKE_PROFIT_PCT = 1;
 export const RISK_REWARD = 3;
 export const MIN_STOP_PCT = 0.005;
 export const MAX_ZONE_STOP_PCT = 0.03;

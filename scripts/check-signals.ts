@@ -1,102 +1,231 @@
 import {
-  ATR_BREAKOUT_USD,
-  RSI_BREAKOUT,
-  buildRiskPlan,
-  decideMatrixSignal,
-  wilderAtr,
-  wilderRsi,
-} from "../src/lib/matrix";
+  buildWallPlan,
+  clusterWalls,
+  cvdFromBars,
+  decideM1Confluence,
+  wallStillReal,
+  type M1Bar,
+  type OnchainFlow,
+  type WhaleWall,
+} from "../src/lib/m1";
 import {
-  formatSellEmail,
+  M1_ALERT_SUBJECT,
+  formatM1Email,
   resetAlertLatch,
-  shouldFireSellAlert,
+  shouldFireM1Alert,
 } from "../src/lib/signal-alert";
-import type { MatrixSnapshot } from "../src/lib/matrix";
 import { mempoolUrl } from "../src/lib/urls";
 
-const rsis = wilderRsi(
-  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-);
-if (rsis.length < 2) throw new Error("rsi length");
-
-const breakout = decideMatrixSignal({ rsi: 92, rsiPrev: 90, atr: 213 });
-if (!breakout.breakoutLock) throw new Error("expected breakout lock at RSI 92 ATR 213");
-if (breakout.lockText !== "BREAKOUT DETECTED - HOLDING SIGNALS") {
-  throw new Error(`lock text: ${breakout.lockText}`);
+function bar(partial: Partial<M1Bar> & { close: number }): M1Bar {
+  const close = partial.close;
+  return {
+    time: partial.time ?? 1,
+    open: partial.open ?? close,
+    high: partial.high ?? close,
+    low: partial.low ?? close,
+    close,
+    volume: partial.volume ?? 10,
+    buyVolume: partial.buyVolume ?? 6,
+    sellVolume: partial.sellVolume ?? 4,
+  };
 }
-if (breakout.signal !== "HOLD") throw new Error("lock must HOLD");
 
-const noLockLowAtr = decideMatrixSignal({ rsi: 92, rsiPrev: 90, atr: 80 });
-if (noLockLowAtr.breakoutLock) throw new Error("ATR 80 should not lock");
+function wall(
+  side: "bid" | "ask",
+  price: number,
+  btc: number,
+  whale = true
+): WhaleWall {
+  return {
+    side,
+    price,
+    priceLow: price - 10,
+    priceHigh: price + 10,
+    btc,
+    venues: ["binance"],
+    whale,
+  };
+}
 
-const sell = decideMatrixSignal({ rsi: 68.4, rsiPrev: 72.1, atr: 120 });
+const emptyFlow: OnchainFlow = {
+  inflows: 0,
+  outflows: 0,
+  netflow: 0,
+  prints: [],
+};
+
+const clustered = clusterWalls(
+  [
+    { price: 64000, btc: 200, venue: "binance" },
+    { price: 64010, btc: 350, venue: "coinbase" },
+    { price: 64100, btc: 90, venue: "kraken" },
+  ],
+  "bid"
+);
+const whale = clustered.find((w) => w.price === 64000);
+if (!whale || whale.btc < 500) {
+  throw new Error(`expected clustered 64000 wall >=500, got ${JSON.stringify(clustered)}`);
+}
+if (!whale.whale) throw new Error("550 BTC cluster must be a whale wall");
+
+const waitNoFlow = decideM1Confluence({
+  flow: emptyFlow,
+  live: 64005,
+  bar: bar({ high: 64020, low: 63980, close: 64005 }),
+  askWalls: [wall("ask", 64100, 600)],
+  bidWalls: [wall("bid", 64000, 600)],
+  cvd: 12,
+});
+if (waitNoFlow.signal !== "WAIT") {
+  throw new Error(`no flow must WAIT, got ${waitNoFlow.signal}`);
+}
+
+const sell = decideM1Confluence({
+  flow: { ...emptyFlow, inflows: 612, netflow: 612 },
+  live: 65010,
+  bar: bar({ high: 65040, low: 64950, close: 65010 }),
+  askWalls: [wall("ask", 65020, 720)],
+  bidWalls: [],
+  cvd: -18,
+});
 if (sell.signal !== "SELL") throw new Error(`expected SELL got ${sell.signal}`);
-if (!sell.exhaustionDrop) throw new Error("exhaustion drop");
 
-const buy = decideMatrixSignal({ rsi: 32, rsiPrev: 28, atr: 120 });
+const sellNoCvd = decideM1Confluence({
+  flow: { ...emptyFlow, inflows: 612, netflow: 612 },
+  live: 65010,
+  bar: bar({ high: 65040, low: 64950, close: 65010 }),
+  askWalls: [wall("ask", 65020, 720)],
+  bidWalls: [],
+  cvd: 22,
+});
+if (sellNoCvd.signal !== "WAIT") {
+  throw new Error("SELL without selling CVD must WAIT");
+}
+
+const buy = decideM1Confluence({
+  flow: { ...emptyFlow, outflows: 540, netflow: -540 },
+  live: 64020,
+  bar: bar({ high: 64100, low: 63990, close: 64020 }),
+  askWalls: [],
+  bidWalls: [wall("bid", 64000, 800)],
+  cvd: 15,
+});
 if (buy.signal !== "BUY") throw new Error(`expected BUY got ${buy.signal}`);
 
-const plan = buildRiskPlan("SELL", 80_000, 200);
-if (!plan) throw new Error("sell plan");
-if (plan.entry !== 80_000) throw new Error("entry vwap");
-if (plan.stop !== 80_300) throw new Error(`stop 1.5*ATR expected 80300 got ${plan.stop}`);
-if (plan.takeProfit !== 79_100) throw new Error(`1:3 tp expected 79100 got ${plan.takeProfit}`);
-if (plan.riskUsd !== 10) throw new Error(`1% of 1000 is 10, got ${plan.riskUsd}`);
-if (Math.abs(plan.sizeBtc - 10 / 300) > 1e-6) {
-  throw new Error(`size 10/300 expected 0.033333 got ${plan.sizeBtc}`);
-}
-if (plan.takeProfit < 50_000) {
-  throw new Error("regressed to 90% of spot");
-}
-
-const buyPlan = buildRiskPlan("BUY", 80_000, 200);
-if (!buyPlan || buyPlan.takeProfit !== 80_900) {
-  throw new Error(`buy tp ${buyPlan?.takeProfit}`);
+const smallWall = decideM1Confluence({
+  flow: { ...emptyFlow, outflows: 540, netflow: -540 },
+  live: 64020,
+  bar: bar({ high: 64100, low: 63990, close: 64020 }),
+  askWalls: [],
+  bidWalls: [wall("bid", 64000, 120, false)],
+  cvd: 15,
+});
+if (smallWall.signal !== "WAIT") {
+  throw new Error("notable <500 BTC wall must not fire");
 }
 
-if (ATR_BREAKOUT_USD !== 150) throw new Error("ATR lock threshold");
-if (RSI_BREAKOUT !== 75) throw new Error("RSI lock threshold");
-
-const highs = [10, 12, 14, 13, 15, 16, 18, 17, 19, 21, 20, 22, 24, 23, 25, 26];
-const lows = highs.map((h) => h - 2);
-const closes = highs.map((h) => h - 1);
-const atrs = wilderAtr(highs, lows, closes);
-if (atrs.length === 0) throw new Error("atr");
-
-if (!shouldFireSellAlert("HOLD", "SELL", false)) {
-  throw new Error("HOLDING → SELL must fire");
+const plan = buildWallPlan("BUY", 64_200, wall("bid", 64_000, 800));
+if (!plan) throw new Error("buy plan");
+if (plan.entry !== 64_200) throw new Error("entry is Global VWAP");
+if (plan.stop >= plan.entry) throw new Error("BUY stop must be below entry");
+if (Math.abs(plan.takeProfit - (64_200 + 3 * (64_200 - plan.stop))) > 0.05) {
+  throw new Error(`1:3 TP mismatch ${plan.takeProfit}`);
 }
-if (shouldFireSellAlert("HOLD", "SELL", true)) {
-  throw new Error("second SELL on same arm must not email");
-}
-if (shouldFireSellAlert("WAIT", "SELL", false)) {
-  throw new Error("cold-start SELL without HOLDING must not email");
-}
-if (shouldFireSellAlert("HOLD", "WAIT", false)) {
-  throw new Error("HOLDING without SELL must not email");
+if (plan.riskUsd !== 10) throw new Error("1% of 1000 is 10");
+if (Math.abs(plan.sizeBtc * (plan.entry - plan.stop) - 10) > 0.05) {
+  throw new Error(`size must risk ~$10, got ${plan.sizeBtc * (plan.entry - plan.stop)}`);
 }
 
-resetAlertLatch("HOLD");
-const mail = formatSellEmail(plan, {
-  live_rsi: 68.2,
-  rsi_prev: 72,
-  live_atr: 200,
-  live_price: 80_000,
-  live_vwap: 80_000,
-  source: "binanceus + coinbase + kraken",
+const sellPlan = buildWallPlan("SELL", 65_000, wall("ask", 65_200, 700));
+if (!sellPlan) throw new Error("sell plan");
+if (sellPlan.stop <= sellPlan.entry) throw new Error("SELL stop must be above wall");
+if (Math.abs(sellPlan.takeProfit - (65_000 - 3 * (sellPlan.stop - 65_000))) > 0.05) {
+  throw new Error(`sell TP ${sellPlan.takeProfit}`);
+}
+
+if (
+  wallStillReal(wall("ask", 65000, 600), [wall("ask", 65020, 500)]) === false
+) {
+  throw new Error("wall that kept 83% size should still be real");
+}
+if (wallStillReal(wall("ask", 65000, 600), [wall("ask", 65020, 200)])) {
+  throw new Error("spoofed wall that shrank should fail");
+}
+
+const bars = [
+  bar({ buyVolume: 10, sellVolume: 4, close: 1 }),
+  bar({ buyVolume: 3, sellVolume: 9, close: 1 }),
+];
+if (cvdFromBars(bars) !== 0) throw new Error(`cvd ${cvdFromBars(bars)}`);
+
+if (!shouldFireM1Alert("SELL", 100, null)) {
+  throw new Error("first SELL on a candle must fire");
+}
+if (!shouldFireM1Alert("BUY", 100, null)) {
+  throw new Error("first BUY on a candle must fire");
+}
+if (shouldFireM1Alert("SELL", 100, 100)) {
+  throw new Error("duplicate on same M1 candle must not fire");
+}
+if (shouldFireM1Alert("WAIT", 100, null)) {
+  throw new Error("WAIT must not email");
+}
+if (!shouldFireM1Alert("BUY", 101, 100)) {
+  throw new Error("next M1 candle may fire again");
+}
+
+resetAlertLatch(null);
+const mail = formatM1Email(plan, {
+  ok: true,
+  error: null,
+  timeframe: "1m",
+  candleKey: 100,
+  live_price: 64_210,
+  live_vwap: 64_200,
+  cvd: 12,
+  cvdLabel: "buying delta",
+  signal: "BUY",
+  recommendation: "test",
+  spoofChecked: true,
+  spoofCleared: true,
+  armedPlan: plan,
+  walls: [],
+  askWalls: [],
+  bidWalls: [],
+  bars: [],
+  flow: { inflows: 0, outflows: 540, netflow: -540, prints: [] },
+  venues: [],
   scannedAt: "2026-09-18T00:00:00.000Z",
-} as MatrixSnapshot);
-if (!mail.subject.includes("SELL / SHORT SETUP")) throw new Error("subject");
-if (!mail.text.includes("Entry (Global VWAP)")) throw new Error("entry line");
-if (!mail.text.includes("Take Profit (1:3 Reward)")) throw new Error("tp line");
-if (!mail.text.includes("Stop Loss (1.5× ATR)")) throw new Error("sl line");
-if (!mail.text.includes("0.0333 BTC")) throw new Error(`size in email: ${mail.text}`);
+  source: "binance + coinbase + kraken",
+});
+if (mail.subject !== M1_ALERT_SUBJECT) {
+  throw new Error(`subject ${mail.subject}`);
+}
+if (!mail.subject.includes("[HIGH-CONFIDENCE CONFLUENCE] M1 Whale Signal Alert")) {
+  throw new Error("exact alert title");
+}
+if (!mail.text.includes("Entry (Global VWAP at trigger)")) {
+  throw new Error("entry line");
+}
+if (!mail.text.includes("Take Profit (1:3 R:R)")) throw new Error("tp line");
+if (!mail.text.includes("Stop (other side of whale wall)")) {
+  throw new Error("sl line");
+}
 
 const recent = mempoolUrl("/mempool/recent");
 if (!recent.startsWith("https://mempool.space/api/mempool/recent")) {
   throw new Error(`expected absolute mempool URL, got ${recent}`);
 }
 
-console.log("breakout", breakout.signal, breakout.lockText);
-console.log("sell plan", plan.entry, "→", plan.takeProfit, "stop", plan.stop, "size", plan.sizeBtc);
+console.log("sell", sell.signal, sell.recommendation);
+console.log(
+  "buy plan",
+  plan.entry,
+  "→",
+  plan.takeProfit,
+  "stop",
+  plan.stop,
+  "size",
+  plan.sizeBtc
+);
 console.log("ok");

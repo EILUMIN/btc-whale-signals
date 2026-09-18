@@ -1,7 +1,7 @@
 {
   "name": "Whale Signal Desk",
   "short_name": "Whale Desk",
-  "description": "BTC/USD whale alerts from Mempool.space with BUY/SELL signals.",
+  "description": "BTC/USD M1 whale desk: on-chain flows and order-book walls.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#12151c",

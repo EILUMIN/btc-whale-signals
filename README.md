@@ -1,23 +1,23 @@
 # Whale Signal Desk
 
-BTC/USD multi-exchange desk. Public **CCXT** pulls Binance, Coinbase, and Kraken together — walang private API keys. Canada-safe: Binance.com → Binance.US fallback.
+BTC/USD desk on a **strict 1-minute (M1)** chart. Public **CCXT** books from Binance, Coinbase, and Kraken plus **Mempool.space** on-chain flows. Walang private API keys. Canada-safe: Binance.com → Binance.US.
 
-Hindi na base ang signal sa lumang $64k whale wall o simpleng wallet notification.
+Walang RSI. Walang ATR. Ang orihinal na whale system: **on-chain flow + order-book walls**.
 
-## Signal generator
+## M1 confluence
 
-| Condition | Result |
+| Side | Fire only when all of these are true |
 | --- | --- |
-| **live_atr > 150** at **live_rsi > 75** | **BREAKOUT DETECTED - HOLDING SIGNALS** |
-| RSI tumawid pabalik **below 70** (exhaustion) | **SELL / SHORT** at live Global VWAP |
-| RSI umahon mula **<30** | **BUY / LONG** at live Global VWAP |
+| **SELL** | On-chain **inflow >500 BTC** into an exchange **and** price tags a **>500 BTC ask wall** **and** M1 **CVD is selling** **and** the wall is still there after **5 seconds** |
+| **BUY** | On-chain **outflow >500 BTC** off an exchange **and** price leans on a **>500 BTC bid wall** **and** M1 **CVD is buying** **and** the wall survives the same 5-second anti-spoof check |
 
-Risk math (auto-updates from live VWAP):
+The dashboard draws those walls as price-level boxes on the M1 chart (solid = whale >500 BTC, dashed = notable ≥80 BTC so you can still see size). Signals never fire on the dashed boxes.
 
-- **ENTRY** = Global VWAP (tatlong exchange)
-- **STOP** = 1.5× ATR
-- **TAKE PROFIT** = 1:3 vs stop distance
-- **SIZE** = 1% of $1,000 wallet ($10 risk)
+Risk math (auto-updates from live Global VWAP at the confluence second):
+
+- **ENTRY** = Global VWAP
+- **STOP** = other side of the whale wall, sized so risk is **$10** on a **$1,000** wallet (1%)
+- **TAKE PROFIT** = **1:3** (three times the stop distance) — the 90% target-accuracy setup, not 90% of BTC’s price
 
 ```bash
 npm install
@@ -34,16 +34,18 @@ python3 master_bot.py
 python3 master_bot.py --once
 ```
 
-Parehong lock (RSI>75 + ATR>$150) at 1:3 VWAP math. Terminal dashboard every 10s.
+Same M1 rules, same $10 / 1:3 math, same one-email-per-candle latch.
 
 Hindi ito financial advice.
 
 ## Email + sound alerts
 
-Kapag lumiko ang loop mula **HOLDING** → **SELL / SHORT SETUP** (RSI drop below 70 pagkatapos ng breakout):
+Kapag mag-fire ang BUY o SELL sa M1 confluence:
 
 1. May **browser ping** sa dashboard.
-2. **Isang email lang** ang papunta sa `elmer.whaledesk@gmail.com` (hindi magre-repeat hangga't hindi bumalik sa HOLDING).
+2. **Isang email lang** bawat 1-minute candle papunta sa `elmer.whaledesk@gmail.com`. Title:
+
+`[HIGH-CONFIDENCE CONFLUENCE] M1 Whale Signal Alert`
 
 Gmail SMTP `smtp.gmail.com:587` + TLS. Ilagay sa `.env`:
 

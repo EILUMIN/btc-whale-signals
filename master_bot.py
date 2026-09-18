@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 master_bot.py
-Global Crypto Market Aggregator & Signal Engine
+M1 Whale Signal Desk — on-chain flows + order-book walls.
 
 Public data only. No private API keys.
 Canada-safe: Binance.US fallback when Binance.com is geo-blocked.
@@ -18,80 +18,68 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
-import smtplib
 import ssl
+import smtplib
 import sys
 import time
-from collections import deque
+import urllib.request
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.message import EmailMessage
-from html.parser import HTMLParser
 from typing import Any
-from urllib.request import Request, urlopen
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from html.parser import HTMLParser
-from typing import Any
-from urllib.request import Request, urlopen
 
-# ---------------------------------------------------------------------------
-# Optional ccxt (required for live books + OHLCV)
-# ---------------------------------------------------------------------------
 try:
     import ccxt  # type: ignore
 except ImportError:  # pragma: no cover
     print("Missing dependency: pip install ccxt", file=sys.stderr)
     sys.exit(1)
 
-
-# ===========================================================================
-# Constants
-# ===========================================================================
-
 SATS = 100_000_000
-WHALE_BTC = 100.0
-BOOK_LIMIT = 50
-NEAR_PCT = 0.01
-SELL_WALL_RATIO = 2.0
-RSI_LEN = 14
-ATR_LEN = 14
-RSI_OVERBOUGHT = 70.0
-RSI_BREAKOUT = 75.0
-RSI_OVERSOLD = 30.0
-ATR_SPIKE_MULT = 1.5
-ATR_BREAKOUT_USD = 150.0
-SL_ATR_MULT = 1.5
-RR_MULT = 3.0
-BREAKEVEN_FRAC = 0.50
-ETF_BULL_USD = 100_000_000.0
+WHALE_BTC = 500.0
+NOTABLE_WALL_BTC = 80.0
+WALL_BUCKET = 25.0
+TOUCH_PCT = 0.0025
+SPOOF_SEC = 5.0
+SPOOF_KEEP = 0.8
 WALLET_USD = 1_000.0
-RISK_PCT = 0.01
-LOOP_SEC = 10
+RISK_USD = 10.0
+RR_MULT = 3.0
+BOOK_LIMIT = 500
+M1_LIMIT = 90
+FLOW_WINDOW_SEC = 60 * 60
+LOOP_SEC = 15
 HTTP_TIMEOUT = 12
-OHLCV_TF = "5m"
-OHLCV_LIMIT = 120
-USER_AGENT = (
-    "Mozilla/5.0 (compatible; MasterBot/1.0; +https://github.com/EILUMIN/btc-whale-signals)"
-)
 GMAIL_SMTP_HOST = "smtp.gmail.com"
 GMAIL_SMTP_PORT = 587
 DEFAULT_EMAIL_RECEIVER = "elmer.whaledesk@gmail.com"
-
-MEMPOOL_API = os.environ.get("MEMPOOL_API_BASE", "https://mempool.space/api").rstrip("/")
-FARSIDE_URL = "https://farside.co.uk/BTC/"
-SOSO_URL = (
-    "https://api.sosovalue.xyz/openapi/v2/etf/historicalInflowChart"
-    "?type=us-btc-spot"
+M1_ALERT_SUBJECT = "[HIGH-CONFIDENCE CONFLUENCE] M1 Whale Signal Alert"
+USER_AGENT = (
+    "Mozilla/5.0 (compatible; MasterBot/2.0; +https://github.com/EILUMIN/btc-whale-signals)"
 )
+MEMPOOL_API = os.environ.get("MEMPOOL_API_BASE", "https://mempool.space/api").rstrip("/")
+
+EXCHANGE_WALLETS = {
+    "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo": "Binance",
+    "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97": "Binance",
+    "3Kzh9qAqVWQhEsfQz7zEQL1EuSx5tyNLNS": "Coinbase",
+    "3Nxwenay9Z8Lc9JBiywTo1sZkyn2nQaaKR": "Coinbase",
+    "3D2oetdNuZUqQHPJmcMDDHYoqkyNVsFk9r": "Bitfinex",
+    "1Kr6QSydW9bFQG1mXiPNNu6WpJGmUa9i1g": "Bitfinex",
+}
+
+ROUTES = [
+    ("binance", "BTC/USDT", "binance"),
+    ("coinbaseexchange", "BTC/USD", "coinbase"),
+    ("kraken", "BTC/USD", "kraken"),
+]
+FALLBACKS = {
+    "binance": ("binanceus", "BTC/USD"),
+    "coinbaseexchange": ("coinbase", "BTC/USD"),
+}
 
 
 def load_dotenv(path: str | None = None) -> None:
-    """Bind EMAIL_* from .env without leaking the app password into logs."""
     root = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if not os.path.isfile(root):
         return
@@ -110,1115 +98,520 @@ def load_dotenv(path: str | None = None) -> None:
 load_dotenv()
 
 
-def send_email_alert(
-    *,
-    entry: float,
-    take_profit: float,
-    stop: float,
-    size_btc: float,
-    rsi: float,
-    atr: float,
-    vwap: float,
-    when: str,
-) -> str:
-    """One Gmail SMTP (587 + TLS) message. Returns sent | skipped | failed:..."""
+def utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def candle_key(ts: float | None = None) -> int:
+    return int((ts if ts is not None else time.time()) // 60)
+
+
+def round_px(value: float) -> float:
+    return round(value + 1e-9, 2)
+
+
+def http_json(url: str) -> Any:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    ctx = ssl.create_default_context()
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT, context=ctx) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def make_exchange(exchange_id: str) -> Any:
+    klass = getattr(ccxt, exchange_id)
+    return klass({"enableRateLimit": True, "timeout": 12_000, "options": {"defaultType": "spot"}})
+
+
+def parse_levels(side: Any) -> list[tuple[float, float]]:
+    rows: list[tuple[float, float]] = []
+    for item in side or []:
+        try:
+            price = float(item[0])
+            amount = float(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if price > 0 and amount > 0:
+            rows.append((price, amount))
+    return rows
+
+
+def pull_book(exchange_id: str, symbol: str, label: str) -> dict[str, Any]:
+    try:
+        ex = make_exchange(exchange_id)
+        ticker = ex.fetch_ticker(symbol)
+        book = ex.fetch_order_book(symbol, BOOK_LIMIT)
+        last = float(ticker.get("last") or ticker.get("close") or 0)
+        return {
+            "name": label,
+            "symbol": symbol,
+            "last": last,
+            "ok": True,
+            "error": None,
+            "bids": parse_levels(book.get("bids")),
+            "asks": parse_levels(book.get("asks")),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "name": label,
+            "symbol": symbol,
+            "last": 0.0,
+            "ok": False,
+            "error": str(exc)[:160],
+            "bids": [],
+            "asks": [],
+        }
+
+
+def pull_book_with_fallback(exchange_id: str, symbol: str, label: str) -> dict[str, Any]:
+    primary = pull_book(exchange_id, symbol, label)
+    if primary["ok"]:
+        return primary
+    fallback = FALLBACKS.get(exchange_id)
+    if not fallback:
+        return primary
+    second = pull_book(fallback[0], fallback[1], label)
+    return second
+
+
+def pull_ohlcv(exchange_id: str, symbol: str) -> list[list[float]]:
+    try:
+        ex = make_exchange(exchange_id)
+        return ex.fetch_ohlcv(symbol, "1m", limit=M1_LIMIT)
+    except Exception:
+        fallback = FALLBACKS.get(exchange_id)
+        if not fallback:
+            return []
+        try:
+            ex = make_exchange(fallback[0])
+            return ex.fetch_ohlcv(fallback[1], "1m", limit=M1_LIMIT)
+        except Exception:
+            return []
+
+
+def cluster_walls(levels: list[tuple[float, float, str]], side: str) -> list[dict[str, Any]]:
+    buckets: dict[float, dict[str, Any]] = {}
+    for price, btc, venue in levels:
+        key = round(price / WALL_BUCKET) * WALL_BUCKET
+        cur = buckets.get(key)
+        if cur is None:
+            cur = {"btc": 0.0, "low": price, "high": price, "venues": set()}
+            buckets[key] = cur
+        cur["btc"] += btc
+        cur["low"] = min(cur["low"], price)
+        cur["high"] = max(cur["high"], price)
+        cur["venues"].add(venue)
+    walls = []
+    for price, cur in buckets.items():
+        if cur["btc"] < NOTABLE_WALL_BTC:
+            continue
+        walls.append(
+            {
+                "side": side,
+                "price": round_px(price),
+                "priceLow": round_px(cur["low"]),
+                "priceHigh": round_px(cur["high"]),
+                "btc": round_px(cur["btc"]),
+                "venues": sorted(cur["venues"]),
+                "whale": cur["btc"] >= WHALE_BTC,
+            }
+        )
+    walls.sort(key=lambda w: w["btc"], reverse=True)
+    return walls
+
+
+def wall_still_real(before: dict[str, Any] | None, after_list: list[dict[str, Any]]) -> bool:
+    if not before:
+        return False
+    for wall in after_list:
+        if wall["side"] != before["side"]:
+            continue
+        if abs(wall["price"] - before["price"]) <= WALL_BUCKET * 1.5:
+            return wall["btc"] >= before["btc"] * SPOOF_KEEP and wall["btc"] >= WHALE_BTC * SPOOF_KEEP
+    return False
+
+
+def touches_ask(bar: dict[str, float], live: float, wall: dict[str, Any]) -> bool:
+    band = wall["price"] * TOUCH_PCT
+    return bar["high"] + band >= wall["priceLow"] and live <= wall["priceHigh"] + band
+
+
+def leans_bid(bar: dict[str, float], live: float, wall: dict[str, Any]) -> bool:
+    band = wall["price"] * TOUCH_PCT
+    return bar["low"] - band <= wall["priceHigh"] and live >= wall["priceLow"] - band
+
+
+def build_plan(side: str, vwap: float, wall: dict[str, Any]) -> dict[str, Any] | None:
+    if vwap <= 0:
+        return None
+    entry = round_px(vwap)
+    buffer = round_px(max(wall["price"] * 0.0002, 5))
+    stop = round_px(wall["priceHigh"] + buffer) if side == "SELL" else round_px(wall["priceLow"] - buffer)
+    risk_per = round_px(abs(entry - stop))
+    if risk_per < 1:
+        return None
+    if side == "SELL" and stop <= entry:
+        return None
+    if side == "BUY" and stop >= entry:
+        return None
+    size = round(RISK_USD / risk_per, 6)
+    tp = round_px(entry - RR_MULT * risk_per) if side == "SELL" else round_px(entry + RR_MULT * risk_per)
+    return {
+        "side": side,
+        "entry": entry,
+        "stop": stop,
+        "takeProfit": tp,
+        "wallPrice": wall["price"],
+        "riskUsd": RISK_USD,
+        "sizeBtc": size,
+        "notionalUsd": round_px(size * entry),
+        "rr": RR_MULT,
+    }
+
+
+def binance_delta() -> dict[int, tuple[float, float]]:
+    hosts = ("https://api.binance.com", "https://api.binance.us")
+    for host in hosts:
+        try:
+            rows = http_json(f"{host}/api/v3/klines?symbol=BTCUSDT&interval=1m&limit={M1_LIMIT}")
+            out: dict[int, tuple[float, float]] = {}
+            for row in rows:
+                ts = int(row[0])
+                volume = float(row[5])
+                buy = float(row[9]) if len(row) > 9 else volume / 2
+                out[ts] = (buy, max(volume - buy, 0.0))
+            return out
+        except Exception:
+            continue
+    return {}
+
+
+def merge_bars(ohlcv_sets: list[list[list[float]]], delta: dict[int, tuple[float, float]]) -> list[dict[str, float]]:
+    series: dict[int, list[list[float]]] = defaultdict(list)
+    for candles in ohlcv_sets:
+        for row in candles:
+            if len(row) < 6:
+                continue
+            series[int(row[0])].append(row)
+    bars = []
+    for ts in sorted(series):
+        rows = series[ts]
+        n = len(rows)
+        open_px = sum(float(r[1]) for r in rows) / n
+        high = sum(float(r[2]) for r in rows) / n
+        low = sum(float(r[3]) for r in rows) / n
+        close = sum(float(r[4]) for r in rows) / n
+        volume = sum(float(r[5]) for r in rows)
+        buy, sell = delta.get(ts, (0.0, 0.0))
+        if ts not in delta:
+            buy = volume * (0.6 if close >= open_px else 0.4)
+            sell = volume - buy
+        bars.append(
+            {
+                "time": ts,
+                "open": round_px(open_px),
+                "high": round_px(high),
+                "low": round_px(low),
+                "close": round_px(close),
+                "volume": volume,
+                "buyVolume": buy,
+                "sellVolume": sell,
+            }
+        )
+    return bars
+
+
+def session_vwap(bars: list[dict[str, float]]) -> float:
+    pv = 0.0
+    vol = 0.0
+    for bar in bars:
+        typical = (bar["high"] + bar["low"] + bar["close"]) / 3
+        pv += typical * bar["volume"]
+        vol += bar["volume"]
+    return pv / vol if vol > 0 else 0.0
+
+
+def classify_tx(tx: dict[str, Any]) -> tuple[str, float, float]:
+    vins = tx.get("vin") or []
+    vouts = tx.get("vout") or []
+    from_ex = 0.0
+    from_wal = 0.0
+    to_ex = 0.0
+    to_wal = 0.0
+    for vin in vins:
+        prev = vin.get("prevout") or {}
+        addr = prev.get("scriptpubkey_address")
+        btc = float(prev.get("value") or 0) / SATS
+        if addr in EXCHANGE_WALLETS:
+            from_ex += btc
+        else:
+            from_wal += btc
+    in_addrs = {
+        (vin.get("prevout") or {}).get("scriptpubkey_address")
+        for vin in vins
+        if (vin.get("prevout") or {}).get("scriptpubkey_address")
+    }
+    for vout in vouts:
+        addr = vout.get("scriptpubkey_address")
+        btc = float(vout.get("value") or 0) / SATS
+        if addr in in_addrs:
+            continue
+        if addr in EXCHANGE_WALLETS:
+            to_ex += btc
+        else:
+            to_wal += btc
+    from_is_ex = from_ex > from_wal
+    to_is_ex = to_ex > to_wal
+    if from_is_ex and to_is_ex:
+        return "internal", 0.0, 0.0
+    if not from_is_ex and to_is_ex:
+        return "inflow", to_ex, 0.0
+    if from_is_ex and not to_is_ex:
+        return "outflow", 0.0, to_wal or from_ex
+    return "unlabeled", 0.0, 0.0
+
+
+def scan_onchain() -> dict[str, Any]:
+    cutoff = time.time() - FLOW_WINDOW_SEC
+    inflows = 0.0
+    outflows = 0.0
+    prints: list[dict[str, Any]] = []
+    txs: dict[str, dict[str, Any]] = {}
+    try:
+        recent = http_json(f"{MEMPOOL_API}/mempool/recent")
+        for preview in recent:
+            value = float(preview.get("value") or 0) / SATS
+            if value < 50:
+                continue
+            txid = preview.get("txid")
+            if not txid:
+                continue
+            try:
+                txs[txid] = http_json(f"{MEMPOOL_API}/tx/{txid}")
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        blocks = http_json(f"{MEMPOOL_API}/v1/blocks")
+        for block in blocks[:2]:
+            try:
+                rows = http_json(f"{MEMPOOL_API}/block/{block['id']}/txs")
+                for tx in rows:
+                    txs[tx["txid"]] = tx
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    for tx in txs.values():
+        status = tx.get("status") or {}
+        when = float(status.get("block_time") or time.time())
+        if when < cutoff:
+            continue
+        kind, inflow, outflow = classify_tx(tx)
+        inflows += inflow
+        outflows += outflow
+        sized = inflow or outflow
+        if sized >= 50:
+            prints.append({"txid": tx.get("txid"), "kind": kind, "btc": round(sized, 2)})
+    return {
+        "inflows": round(inflows, 2),
+        "outflows": round(outflows, 2),
+        "prints": prints[:12],
+    }
+
+
+def decide(flow: dict[str, Any], live: float, bar: dict[str, float] | None, asks: list[dict[str, Any]], bids: list[dict[str, Any]], cvd: float) -> dict[str, Any]:
+    if not bar:
+        return {"signal": "WAIT", "wall": None, "why": "Waiting for the current M1 candle."}
+    whale_asks = [w for w in asks if w["whale"]]
+    whale_bids = [w for w in bids if w["whale"]]
+    ask_hit = next((w for w in whale_asks if touches_ask(bar, live, w)), None)
+    bid_hit = next((w for w in whale_bids if leans_bid(bar, live, w)), None)
+    inflow = flow["inflows"] >= WHALE_BTC
+    outflow = flow["outflows"] >= WHALE_BTC
+    if inflow and ask_hit and cvd <= 0:
+        return {
+            "signal": "SELL",
+            "wall": ask_hit,
+            "why": "M1 SELL: inflow >500 BTC + ask wall + selling CVD.",
+        }
+    if outflow and bid_hit and cvd >= 0:
+        return {
+            "signal": "BUY",
+            "wall": bid_hit,
+            "why": "M1 BUY: outflow >500 BTC + bid wall + buying CVD.",
+        }
+    missing = []
+    if not inflow and not outflow:
+        missing.append("no >500 BTC labeled inflow/outflow this hour")
+    if not ask_hit and not bid_hit:
+        missing.append("price not touching a >500 BTC book wall")
+    if inflow and ask_hit and cvd > 0:
+        missing.append("CVD not confirming sell")
+    if outflow and bid_hit and cvd < 0:
+        missing.append("CVD not confirming buy")
+    return {
+        "signal": "WAIT",
+        "wall": ask_hit or bid_hit,
+        "why": "M1 confluence waiting: " + ("; ".join(missing) or "filters not aligned") + ".",
+    }
+
+
+def send_email_alert(plan: dict[str, Any], snap: dict[str, Any]) -> str:
     sender = os.environ.get("EMAIL_SENDER", "").strip()
     password = os.environ.get("EMAIL_APP_PASSWORD", "").strip()
-    receiver = (
-        os.environ.get("EMAIL_RECEIVER", "").strip() or DEFAULT_EMAIL_RECEIVER
-    )
+    receiver = os.environ.get("EMAIL_RECEIVER", "").strip() or DEFAULT_EMAIL_RECEIVER
     if not sender or not password:
         return "skipped"
     body = (
-        "SELL / SHORT SETUP\n\n"
-        "The generator left HOLDING (breakout lock) after RSI dropped back below 70.\n"
-        "Numbers are live Global VWAP — not a stale whale wall.\n\n"
-        f"Entry (Global VWAP): ${entry:,.2f}\n"
-        f"Take Profit (1:3 Reward): ${take_profit:,.2f}\n"
-        f"Stop Loss (1.5× ATR): ${stop:,.2f}\n"
-        f"Safe size (1% of $1,000): {size_btc:.4f} BTC\n"
-        f"live_rsi: {rsi:.2f}\n"
-        f"live_atr: ${atr:,.2f}\n"
-        f"Global VWAP: ${vwap:,.2f}\n"
-        f"when: {when}\n\n"
+        f"{M1_ALERT_SUBJECT}\n\n"
+        f"{plan['side']} confluence on the 1-minute chart.\n"
+        "On-chain flow + order-book wall + CVD agreed. 5-second anti-spoof passed.\n\n"
+        f"Side: {plan['side']}\n"
+        f"Entry (Global VWAP at trigger): ${plan['entry']:,.2f}\n"
+        f"Stop (other side of whale wall): ${plan['stop']:,.2f}\n"
+        f"Take Profit (1:3 R:R): ${plan['takeProfit']:,.2f}\n"
+        f"Safe size (1% of $1,000): {plan['sizeBtc']:.6f} BTC\n"
+        f"Whale wall: ${plan['wallPrice']:,.2f}\n"
+        f"On-chain inflow: {snap['flow']['inflows']:.2f} BTC\n"
+        f"On-chain outflow: {snap['flow']['outflows']:.2f} BTC\n"
+        f"CVD (M1): {snap['cvd']:.2f}\n"
+        f"Live price: ${snap['live']:.2f}\n"
+        f"when: {snap['when']}\n\n"
         "Not financial advice.\n"
     )
     msg = EmailMessage()
-    msg["Subject"] = "Whale Signal Desk — SELL / SHORT SETUP"
+    msg["Subject"] = M1_ALERT_SUBJECT
     msg["From"] = f"Whale Signal Desk <{sender}>"
     msg["To"] = receiver
     msg.set_content(body)
     try:
-        context = ssl.create_default_context()
         with smtplib.SMTP(GMAIL_SMTP_HOST, GMAIL_SMTP_PORT, timeout=20) as smtp:
-            smtp.ehlo()
-            smtp.starttls(context=context)
-            smtp.ehlo()
+            smtp.starttls(context=ssl.create_default_context())
             smtp.login(sender, password)
             smtp.send_message(msg)
         return "sent"
     except Exception as exc:  # noqa: BLE001
-        return f"failed: {exc}"[:180]
+        return f"failed:{exc}"[:180]
 
 
-# Publicly labeled exchange clusters (BitInfoCharts / community labels).
-EXCHANGE_WALLETS: dict[str, str] = {
-    "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo": "Binance",
-    "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97": "Binance",
-    "3M219KR5vEneNb47ewrPfWyb5jQ2DjxRP6": "Binance",
-    "bc1qm34lsc65zpw79lxes69zkqmk6ee3ewf0j77s3h": "Binance",
-    "1NDyJtNTjmwk5xPNhjgAMu4HDHigtobu1s": "Binance",
-    "3JZq4atUahhuA9rLh7JfTUiCTCoRg3S8oS": "Binance",
-    "3LYJfcfHPXYJreMsASk2jkn69LWEYKzexb": "Binance",
-    "1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ": "Binance",
-    "385cR5DM96n1HvBDMzLHPYcw89fZAXULJP": "Binance",
-    "1LQoWist8KkaUXSPKZHNvEyfrEkPHzSsCd": "Binance",
-    "3LQeSjqS5a2sJDfcQpCUEGmCUS9skryALt": "Binance",
-    "3Kzh9qAqVWQhEsfQz7zEQL1EuSx5tyNLNS": "Coinbase",
-    "3Nxwenay9Z8Lc9JBiywTo1sZkyn2nQaaKR": "Coinbase",
-    "3D2oetdNuZUqQHPJmcMDDHYoqkyNVsFk9r": "Bitfinex",
-    "1Kr6QSydW9bFQG1mXiPNNu6WpJGmUa9i1g": "Bitfinex",
-    "bc1qazcm763858nkj2dj986etajv6wquslv8uxwczt": "Bitfinex",
-    "1FfmbHfnpaZjKFvyi1okTjJJusN455paPH": "Bitfinex",
-    "bc1ql49ydapnjafl5t2cp9zqpjwe6pdgmxy98859v2": "OKX",
-    "bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6": "OKX",
-    "bc1q5shngj24323nsrmxv99st02na6srekfctt30ch": "Kraken",
-    "3FupZp77ySr7jwoLYEJ9mwzJpvoNBXsBnE": "Kraken",
-    "3BMEXqGpG4FxBA1KWhRFufXfSTRgzfDBhJ": "BitMEX",
-    "3BMEXDR3sAq2xDx2SSivNT6BGUjrF4oGCX": "BitMEX",
-    "1HckjUpRGcrrRAtFaaCAUaGjsPx9oYmLaZ": "HTX",
-    "1KYiKJEfdJtap9QX2v9BxAdVwzSpoVu4Uo": "Bitstamp",
-    "3NNsvp7dfevkKqwkM6ZPZ2huUMPtFP1166": "Bittrex",
-}
-
-# ANSI
-RESET = "\033[0m"
-BOLD = "\033[1m"
-DIM = "\033[2m"
-RED = "\033[31m"
-GRN = "\033[32m"
-YEL = "\033[33m"
-BLU = "\033[34m"
-CYN = "\033[36m"
-WHT = "\033[97m"
-
-
-# ===========================================================================
-# Small helpers
-# ===========================================================================
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def iso_now() -> str:
-    return utc_now().strftime("%Y-%m-%d %H:%M:%S UTC")
-
-
-def money(value: float | None, digits: int = 2) -> str:
-    if value is None or not isinstance(value, (int, float)):
-        return "—"
-    return f"${value:,.{digits}f}"
-
-
-def btc_fmt(value: float | None) -> str:
-    if value is None:
-        return "—"
-    return f"{value:,.4f} BTC"
-
-
-def clamp(n: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, n))
-
-
-def is_exchange(addr: str | None) -> bool:
-    if not addr:
-        return False
-    return addr in EXCHANGE_WALLETS
-
-
-def http_get(url: str, timeout: int = HTTP_TIMEOUT) -> bytes:
-    req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
-    with urlopen(req, timeout=timeout) as resp:
-        return resp.read()
-
-
-def http_json(url: str, timeout: int = HTTP_TIMEOUT) -> Any:
-    return json.loads(http_get(url, timeout=timeout).decode("utf-8", "replace"))
-
-
-# ===========================================================================
-# MODULE 1 — Global Liquidity Aggregator (Order Flow Force)
-# ===========================================================================
-
-@dataclass
-class VenueBook:
-    name: str
-    symbol: str
-    bid: float = 0.0
-    ask: float = 0.0
-    last: float = 0.0
-    bids_near: float = 0.0
-    asks_near: float = 0.0
-    spread: float = 0.0
-    ok: bool = False
-    error: str = ""
-
-
-@dataclass
-class LiquiditySnapshot:
-    venues: list[VenueBook] = field(default_factory=list)
-    live: float = 0.0
-    spread: float = 0.0
-    bids_near: float = 0.0
-    asks_near: float = 0.0
-    ask_bid_ratio: float = 0.0
-    heavy_sell: bool = False
-    heavy_buy: bool = False
-    pressure: str = "NEUTRAL"
-
-
-def _levels(side: Any) -> list[tuple[float, float]]:
-    rows: list[tuple[float, float]] = []
-    for item in side or []:
-        try:
-            price, amount = float(item[0]), float(item[1])
-        except (TypeError, ValueError, IndexError):
-            continue
-        rows.append((price, amount))
-    return rows
-
-
-def _make_exchange(ex_id: str) -> Any:
-    klass = getattr(ccxt, ex_id)
-    return klass(
-        {
-            "enableRateLimit": True,
-            "timeout": HTTP_TIMEOUT * 1000,
-            "options": {"defaultType": "spot"},
+def snapshot(skip_spoof: bool = False) -> dict[str, Any]:
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        book_futs = {
+            pool.submit(pull_book_with_fallback, ex_id, symbol, label): label
+            for ex_id, symbol, label in ROUTES
         }
-    )
-
-
-def _pull_book(ex_id: str, symbol: str, live_hint: float) -> VenueBook:
-    row = VenueBook(name=ex_id, symbol=symbol)
-    try:
-        ex = _make_exchange(ex_id)
-        ticker = ex.fetch_ticker(symbol)
-        last = float(ticker.get("last") or ticker.get("close") or 0.0)
-        book = ex.fetch_order_book(symbol, limit=BOOK_LIMIT)
-        bids = _levels(book.get("bids"))
-        asks = _levels(book.get("asks"))
-        bid = float(bids[0][0]) if bids else last
-        ask = float(asks[0][0]) if asks else last
-        mid = (bid + ask) / 2.0 if bid and ask else last
-        ref = live_hint or mid or last
-        lo, hi = ref * (1.0 - NEAR_PCT), ref * (1.0 + NEAR_PCT)
-        bids_near = sum(float(s) for p, s in bids if float(p) >= lo)
-        asks_near = sum(float(s) for p, s in asks if float(p) <= hi)
-        row.bid = bid
-        row.ask = ask
-        row.last = last or mid
-        row.bids_near = bids_near
-        row.asks_near = asks_near
-        row.spread = ask - bid if ask and bid else 0.0
-        row.ok = True
-    except Exception as exc:  # noqa: BLE001 — venue isolation
-        row.error = str(exc)[:160]
-    return row
-
-
-class LiquidityAggregator:
-    """Binance + Coinbase + Kraken public order books, merged within 1% of live."""
-
-    def __init__(self) -> None:
-        self.routes: list[tuple[str, str]] = [
-            ("binance", "BTC/USDT"),
-            ("coinbaseexchange", "BTC/USD"),
-            ("kraken", "BTC/USD"),
+        ohlcv_futs = [
+            pool.submit(pull_ohlcv, ex_id, symbol) for ex_id, symbol, _ in ROUTES
         ]
-        self._fallbacks = {
-            "binance": ("binanceus", "BTC/USD"),
-            "coinbaseexchange": ("coinbase", "BTC/USD"),
-        }
+        delta_fut = pool.submit(binance_delta)
+        flow_fut = pool.submit(scan_onchain)
+        books = [fut.result() for fut in as_completed(book_futs)]
+        ohlcvs = [fut.result() for fut in ohlcv_futs]
+        delta = delta_fut.result()
+        flow = flow_fut.result()
 
-    def fetch(self) -> LiquiditySnapshot:
-        snap = LiquiditySnapshot()
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futs = [pool.submit(_pull_book, ex, sym, 0.0) for ex, sym in self.routes]
-            books = [f.result() for f in as_completed(futs)]
-
-        repaired: list[VenueBook] = []
-        for book in books:
-            if not book.ok and book.name in self._fallbacks:
-                fb = _pull_book(*self._fallbacks[book.name], 0.0)
-                repaired.append(fb)
-            else:
-                repaired.append(book)
-        snap.venues = sorted(repaired, key=lambda b: b.name)
-
-        goods = [v for v in snap.venues if v.ok and v.last > 0]
-        if not goods:
-            snap.pressure = "NO BOOK DATA"
-            return snap
-
-        snap.live = sum(v.last for v in goods) / len(goods)
-        # Re-sum near-touch using the global live mid (second pass, cheap).
-        snap.bids_near = sum(v.bids_near for v in goods)
-        snap.asks_near = sum(v.asks_near for v in goods)
-        snap.spread = sum(v.spread for v in goods) / len(goods)
-        if snap.bids_near > 0:
-            snap.ask_bid_ratio = snap.asks_near / snap.bids_near
-        elif snap.asks_near > 0:
-            snap.ask_bid_ratio = float("inf")
-        snap.heavy_sell = snap.asks_near >= SELL_WALL_RATIO * max(snap.bids_near, 1e-9)
-        snap.heavy_buy = snap.bids_near >= SELL_WALL_RATIO * max(snap.asks_near, 1e-9)
-        if snap.heavy_sell:
-            snap.pressure = "HEAVY INSTITUTIONAL SELLING PRESSURE"
-        elif snap.heavy_buy:
-            snap.pressure = "HEAVY INSTITUTIONAL BUYING PRESSURE"
-        else:
-            snap.pressure = "BALANCED BOOK"
-        return snap
-
-
-# ===========================================================================
-# MODULE 2 — On-chain Supply Tracker (Whale Inflow / Outflow Force)
-# Public REST: Mempool.space Esplora (same chain data Whale Alert reads).
-# ===========================================================================
-
-@dataclass
-class WhaleTx:
-    txid: str
-    btc: float
-    kind: str  # inflow | outflow | internal | unlabeled
-    when: str
-    origin: str
-    dest: str
-
-
-@dataclass
-class WhaleSnapshot:
-    inflows: float = 0.0
-    outflows: float = 0.0
-    netflow: float = 0.0
-    sentiment: str = "NEUTRAL"
-    prints: list[WhaleTx] = field(default_factory=list)
-    error: str = ""
-
-
-def _classify_tx(tx: dict[str, Any]) -> WhaleTx | None:
-    txid = str(tx.get("txid") or "")
-    vins = tx.get("vin") or []
-    vouts = tx.get("vout") or []
-    from_ex = False
-    to_ex = False
-    from_label = "wallet"
-    to_label = "wallet"
-    total_sats = 0
-    for vin in vins:
-        prev = vin.get("prevout") or {}
-        addr = prev.get("scriptpubkey_address")
-        if is_exchange(addr):
-            from_ex = True
-            from_label = EXCHANGE_WALLETS.get(addr or "", "exchange")
-    for vout in vouts:
-        addr = vout.get("scriptpubkey_address")
-        total_sats += int(vout.get("value") or 0)
-        if is_exchange(addr):
-            to_ex = True
-            to_label = EXCHANGE_WALLETS.get(addr or "", "exchange")
-    btc = total_sats / SATS
-    if btc < WHALE_BTC:
-        return None
-    if from_ex and to_ex:
-        kind = "internal"
-    elif to_ex and not from_ex:
-        kind = "inflow"
-    elif from_ex and not to_ex:
-        kind = "outflow"
-    else:
-        kind = "unlabeled"
-    status = tx.get("status") or {}
-    ts = status.get("block_time") or int(time.time())
-    when = datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    return WhaleTx(
-        txid=txid,
-        btc=btc,
-        kind=kind,
-        when=when,
-        origin=from_label,
-        dest=to_label,
-    )
-
-
-class OnchainTracker:
-    def __init__(self) -> None:
-        self.seen: dict[str, WhaleTx] = {}
-        self.cursor = 0
-        self.addresses = list(EXCHANGE_WALLETS.keys())
-
-    def _ingest(self, txid: str) -> None:
-        if txid in self.seen:
-            return
-        try:
-            tx = http_json(f"{MEMPOOL_API}/tx/{txid}")
-            row = _classify_tx(tx)
-            if row:
-                self.seen[txid] = row
-        except Exception:
-            return
-
-    def fetch(self) -> WhaleSnapshot:
-        snap = WhaleSnapshot()
-        try:
-            recent = http_json(f"{MEMPOOL_API}/mempool/recent")
-            if isinstance(recent, list):
-                for item in recent:
-                    value = int(item.get("value") or 0)
-                    txid = item.get("txid")
-                    if txid and value >= WHALE_BTC * SATS:
-                        self._ingest(str(txid))
-
-            # Rotate a few labeled exchange wallets each cycle.
-            batch = 3
-            start = self.cursor % max(len(self.addresses), 1)
-            for i in range(batch):
-                addr = self.addresses[(start + i) % len(self.addresses)]
-                try:
-                    txs = http_json(f"{MEMPOOL_API}/address/{addr}/txs")
-                    if isinstance(txs, list):
-                        for tx in txs[:6]:
-                            row = _classify_tx(tx)
-                            if row:
-                                self.seen[row.txid] = row
-                except Exception:
-                    continue
-                time.sleep(0.12)
-            self.cursor = (start + batch) % len(self.addresses)
-        except Exception as exc:  # noqa: BLE001
-            snap.error = str(exc)[:160]
-
-        # Rolling 24h window
-        cutoff = time.time() - 24 * 3600
-        live: list[WhaleTx] = []
-        for row in self.seen.values():
-            try:
-                ts = datetime.strptime(row.when, "%Y-%m-%d %H:%M UTC").replace(
-                    tzinfo=timezone.utc
-                ).timestamp()
-            except ValueError:
-                ts = time.time()
-            if ts >= cutoff:
-                live.append(row)
-        snap.prints = sorted(live, key=lambda r: r.btc, reverse=True)[:12]
-        snap.inflows = sum(r.btc for r in live if r.kind == "inflow")
-        snap.outflows = sum(r.btc for r in live if r.kind == "outflow")
-        snap.netflow = snap.inflows - snap.outflows
-        if snap.netflow > 0:
-            snap.sentiment = "POSITIVE NETFLOW (+)  selling pressure (in > out)"
-        elif snap.netflow < 0:
-            snap.sentiment = "NEGATIVE NETFLOW (−)  accumulation (out > in)"
-        else:
-            snap.sentiment = "FLAT NETFLOW"
-        return snap
-
-
-# ===========================================================================
-# MODULE 3 — Institutional ETF Flow Monitor (Wall Street Force)
-# Public HTML: Farside Investors. JSON fallback: SoSoValue open API.
-# ===========================================================================
-
-@dataclass
-class EtfSnapshot:
-    date: str = "—"
-    total_usd: float = 0.0
-    ibit_usd: float = 0.0
-    fbtc_usd: float = 0.0
-    sentiment: str = "NEUTRAL / NO PRINT"
-    source: str = ""
-    error: str = ""
-    fetched_at: float = 0.0
-
-
-class _TableParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.rows: list[list[str]] = []
-        self._row: list[str] = []
-        self._cell = False
-        self._buf: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "tr":
-            self._row = []
-        if tag in {"td", "th"}:
-            self._cell = True
-            self._buf = []
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"td", "th"} and self._cell:
-            self._row.append("".join(self._buf).strip())
-            self._cell = False
-        if tag == "tr" and self._row:
-            self.rows.append(self._row)
-
-    def handle_data(self, data: str) -> None:
-        if self._cell:
-            self._buf.append(data)
-
-
-_DATE = re.compile(
-    r"^\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+20\d{2}$",
-    re.I,
-)
-
-
-def _to_million(cell: str) -> float | None:
-    raw = cell.strip().replace(",", "").replace("–", "-").replace("—", "-")
-    if raw in {"", "-", "–", "—"}:
-        return None
-    neg = raw.startswith("(") and raw.endswith(")")
-    raw = raw.replace("(", "").replace(")", "")
-    try:
-        value = float(raw)
-    except ValueError:
-        return None
-    return -abs(value) if neg or value < 0 else value
-
-
-class EtfMonitor:
-    def __init__(self) -> None:
-        self.cache: EtfSnapshot | None = None
-        self.ttl = 15 * 60
-
-    def fetch(self) -> EtfSnapshot:
-        if self.cache and time.time() - self.cache.fetched_at < self.ttl:
-            return self.cache
-        snap = self._from_farside()
-        if snap.date == "—" or snap.error:
-            alt = self._from_soso()
-            if alt.date != "—":
-                snap = alt
-        snap.fetched_at = time.time()
-        if snap.total_usd >= ETF_BULL_USD:
-            snap.sentiment = "BULLISH APPRECIATION"
-        elif snap.total_usd < 0:
-            snap.sentiment = "BEARISH DISTRIBUTION"
-        elif snap.date != "—":
-            snap.sentiment = "NEUTRAL / LIGHT FLOW"
-        self.cache = snap
-        return snap
-
-    def _from_farside(self) -> EtfSnapshot:
-        snap = EtfSnapshot(source="Farside Investors (public HTML)")
-        try:
-            html = http_get(FARSIDE_URL).decode("utf-8", "replace")
-            parser = _TableParser()
-            parser.feed(html)
-            header: list[str] = []
-            dated: list[tuple[str, list[str]]] = []
-            for row in parser.rows:
-                cells = [c.strip() for c in row if c.strip() != ""]
-                if not cells:
-                    continue
-                if any(c.upper() == "IBIT" for c in cells) and any(
-                    c.upper() == "FBTC" for c in cells
-                ):
-                    header = [c.upper() for c in cells]
-                    continue
-                if _DATE.match(cells[0]):
-                    dated.append((cells[0], cells))
-            if not dated:
-                snap.error = "Farside table had no dated rows"
-                return snap
-            # Skip pending "dash" days (today often prints '-' / 0.0).
-            chosen = None
-            for date, cells in reversed(dated):
-                nums = [c for c in cells[1:] if _to_million(c) is not None]
-                total = _to_million(cells[-1]) if cells else None
-                if total is None:
-                    continue
-                # A fully pending row is all dashes / zeros with a 0.0 total.
-                if abs(total) < 1e-9 and all(
-                    (_to_million(c) or 0.0) == 0.0 for c in cells[1:]
-                ):
-                    continue
-                chosen = (date, cells, header, total)
-                break
-            if not chosen:
-                snap.error = "No completed Farside session yet"
-                return snap
-            date, cells, header, total = chosen
-            snap.date = date
-            snap.total_usd = float(total) * 1_000_000.0
-            funds = [c for c in header if c not in {"", "TOTAL", "FEE"}]
-            values = cells[1:]
-            by_fund: dict[str, float] = {}
-            for name, raw in zip(funds, values):
-                parsed = _to_million(raw)
-                if parsed is not None:
-                    by_fund[name] = parsed * 1_000_000.0
-            snap.ibit_usd = by_fund.get("IBIT", 0.0)
-            snap.fbtc_usd = by_fund.get("FBTC", 0.0)
-            if values:
-                last = _to_million(values[-1])
-                if last is not None:
-                    snap.total_usd = last * 1_000_000.0
-        except Exception as exc:  # noqa: BLE001
-            snap.error = str(exc)[:160]
-        return snap
-
-    def _from_soso(self) -> EtfSnapshot:
-        snap = EtfSnapshot(source="SoSoValue public API")
-        try:
-            payload = http_json(SOSO_URL)
-            rows = payload.get("data") or payload.get("list") or payload
-            if isinstance(rows, dict):
-                rows = rows.get("list") or rows.get("data") or []
-            if not isinstance(rows, list) or not rows:
-                snap.error = "SoSoValue empty"
-                return snap
-            last = rows[-1]
-            snap.date = str(last.get("date") or last.get("time") or "latest")
-            total = float(last.get("totalNetInflow") or last.get("value") or 0.0)
-            # Some feeds are already in USD, some in millions.
-            snap.total_usd = total if abs(total) > 10_000 else total * 1_000_000.0
-        except Exception as exc:  # noqa: BLE001
-            snap.error = str(exc)[:160]
-        return snap
-
-
-# ===========================================================================
-# MODULE 4 — Technical Execution & Momentum Guard
-# Combined 3-exchange OHLCV → RSI(14), ATR(14), VWAP
-# ===========================================================================
-
-@dataclass
-class TechSnapshot:
-    rsi: float = 0.0
-    rsi_prev: float = 0.0
-    atr: float = 0.0
-    atr_avg: float = 0.0
-    vwap: float = 0.0
-    volume: float = 0.0
-    cross_below_70: bool = False
-    recover_from_30: bool = False
-    atr_spike: bool = False
-    breakout_lock: bool = False
-    bars: int = 0
-    error: str = ""
-
-
-def _wilder_rsi(closes: list[float], length: int = RSI_LEN) -> list[float]:
-    if len(closes) < length + 1:
-        return []
-    gains, losses = [], []
-    for i in range(1, len(closes)):
-        delta = closes[i] - closes[i - 1]
-        gains.append(max(delta, 0.0))
-        losses.append(max(-delta, 0.0))
-    avg_g = sum(gains[:length]) / length
-    avg_l = sum(losses[:length]) / length
-    out: list[float] = []
-    for i in range(length, len(gains)):
-        avg_g = (avg_g * (length - 1) + gains[i]) / length
-        avg_l = (avg_l * (length - 1) + losses[i]) / length
-        rs = avg_g / avg_l if avg_l else 100.0
-        out.append(100.0 - (100.0 / (1.0 + rs)))
-    # Seed first RSI after initial average
-    rs0 = (sum(gains[:length]) / length) / (sum(losses[:length]) / length or 1e-12)
-    first = 100.0 - (100.0 / (1.0 + rs0))
-    return [first] + out
-
-
-def _wilder_atr(highs: list[float], lows: list[float], closes: list[float], length: int = ATR_LEN) -> list[float]:
-    if len(closes) < length + 1:
-        return []
-    trs: list[float] = []
-    for i in range(1, len(closes)):
-        tr = max(
-            highs[i] - lows[i],
-            abs(highs[i] - closes[i - 1]),
-            abs(lows[i] - closes[i - 1]),
-        )
-        trs.append(tr)
-    atr = sum(trs[:length]) / length
-    out = [atr]
-    for tr in trs[length:]:
-        atr = (atr * (length - 1) + tr) / length
-        out.append(atr)
-    return out
-
-
-class MomentumGuard:
-    def __init__(self) -> None:
-        self.rsi_hist: deque[float] = deque(maxlen=8)
-
-    def fetch(self) -> TechSnapshot:
-        snap = TechSnapshot()
-        routes = [
-            ("binance", "BTC/USDT"),
-            ("binanceus", "BTC/USD"),
-            ("coinbaseexchange", "BTC/USD"),
-            ("kraken", "BTC/USD"),
+    goods = [b for b in books if b["ok"] and b["last"] > 0]
+    live = sum(b["last"] for b in goods) / len(goods) if goods else 0.0
+    bid_levels = [(p, q, b["name"]) for b in books for p, q in b["bids"]]
+    ask_levels = [(p, q, b["name"]) for b in books for p, q in b["asks"]]
+    bid_walls = cluster_walls(bid_levels, "bid")
+    ask_walls = cluster_walls(ask_levels, "ask")
+    bars = merge_bars(ohlcvs, delta)
+    vwap = session_vwap(bars) or live
+    cvd = sum(bar["buyVolume"] - bar["sellVolume"] for bar in bars)
+    bar = bars[-1] if bars else None
+    decision = decide(flow, live or vwap, bar, ask_walls, bid_walls, cvd)
+    spoof_checked = False
+    spoof_cleared = False
+    if decision["signal"] in {"BUY", "SELL"} and decision["wall"] and not skip_spoof:
+        spoof_checked = True
+        time.sleep(SPOOF_SEC)
+        books2 = [
+            pull_book_with_fallback(ex_id, symbol, label) for ex_id, symbol, label in ROUTES
         ]
-        series: dict[int, list[tuple[float, float, float, float]]] = {}
-        errors: list[str] = []
-
-        def pull(ex_id: str, symbol: str) -> list[list[float]]:
-            ex = _make_exchange(ex_id)
-            return ex.fetch_ohlcv(symbol, timeframe=OHLCV_TF, limit=OHLCV_LIMIT)
-
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futs = {pool.submit(pull, ex, sym): ex for ex, sym in routes}
-            for fut in as_completed(futs):
-                name = futs[fut]
-                try:
-                    candles = fut.result()
-                    for ts, o, h, l, c, v in candles:
-                        bucket = int(ts)
-                        series.setdefault(bucket, []).append(
-                            (float(h), float(l), float(c), float(v))
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(f"{name}: {exc}"[:80])
-
-        if not series:
-            snap.error = "; ".join(errors) or "no OHLCV"
-            return snap
-
-        stamps = sorted(series)
-        highs, lows, closes, vols, typical = [], [], [], [], []
-        for ts in stamps:
-            rows = series[ts]
-            h = sum(r[0] for r in rows) / len(rows)
-            l = sum(r[1] for r in rows) / len(rows)
-            c = sum(r[2] for r in rows) / len(rows)
-            v = sum(r[3] for r in rows)
-            highs.append(h)
-            lows.append(l)
-            closes.append(c)
-            vols.append(v)
-            typical.append(((h + l + c) / 3.0) * v)
-
-        snap.volume = sum(vols[-24:])
-        vol_sum = sum(vols) or 1e-9
-        snap.vwap = sum(typical) / vol_sum
-        rsis = _wilder_rsi(closes, RSI_LEN)
-        atrs = _wilder_atr(highs, lows, closes, ATR_LEN)
-        snap.bars = len(closes)
-        if rsis:
-            snap.rsi = rsis[-1]
-            snap.rsi_prev = rsis[-2] if len(rsis) > 1 else rsis[-1]
-            self.rsi_hist.append(snap.rsi)
-        if atrs:
-            snap.atr = atrs[-1]
-            tail = atrs[-20:] if len(atrs) >= 5 else atrs
-            snap.atr_avg = sum(tail) / len(tail)
-            snap.atr_spike = snap.atr >= ATR_SPIKE_MULT * max(snap.atr_avg, 1e-9)
-        snap.cross_below_70 = snap.rsi_prev >= RSI_OVERBOUGHT and snap.rsi < RSI_OVERBOUGHT
-        snap.recover_from_30 = snap.rsi_prev <= RSI_OVERSOLD and snap.rsi > RSI_OVERSOLD
-        snap.breakout_lock = snap.rsi > RSI_BREAKOUT and snap.atr > ATR_BREAKOUT_USD
-        if errors and not rsis:
-            snap.error = "; ".join(errors)
-        return snap
-
-
-# ===========================================================================
-# MODULE 5 — Core Signal Matrix & Risk Math
-# ===========================================================================
-
-@dataclass
-class TradePlan:
-    side: str  # BUY | SELL | NONE
-    reason: str
-    entry: float = 0.0
-    stop: float = 0.0
-    take_profit: float = 0.0
-    risk_usd: float = 0.0
-    size_btc: float = 0.0
-    notional: float = 0.0
-    rr: float = RR_MULT
-    breakeven: bool = False
-    blocked: str = ""
-
-
-@dataclass
-class PaperState:
-    side: str = "FLAT"
-    entry: float = 0.0
-    stop: float = 0.0
-    take_profit: float = 0.0
-    size_btc: float = 0.0
-    opened_at: str = ""
-    breakeven: bool = False
-
-
-def build_plan(
-    liq: LiquiditySnapshot,
-    whales: WhaleSnapshot,
-    tech: TechSnapshot,
-    wallet: float,
-    live: float,
-    paper: PaperState,
-) -> TradePlan:
-    entry = tech.vwap if tech.vwap > 0 else live
-    atr = tech.atr if tech.atr > 0 else entry * 0.004
-    risk_usd = wallet * RISK_PCT
-    plan = TradePlan(side="NONE", reason="No confluence yet.", entry=entry)
-
-    blocked = []
-    if tech.breakout_lock:
-        blocked.append(
-            "BREAKOUT DETECTED - HOLDING SIGNALS (RSI>75 and ATR>$150)."
+        bid_walls = cluster_walls(
+            [(p, q, b["name"]) for b in books2 for p, q in b["bids"]], "bid"
         )
-    plan.blocked = " | ".join(blocked)
-
-    want_sell = tech.cross_below_70 and not tech.breakout_lock
-    want_buy = tech.recover_from_30 and not tech.breakout_lock
-
-    if want_sell:
-        stop = entry + SL_ATR_MULT * atr
-        risk = stop - entry
-        tp = entry - RR_MULT * risk
-        size = risk_usd / risk if risk > 0 else 0.0
-        plan = TradePlan(
-            side="SELL",
-            reason=(
-                "RSI exhaustion drop below 70. Entry is live Global VWAP. "
-                "1:3 take-profit from 1.5× ATR stop. Not a stale whale wall."
-            ),
-            entry=entry,
-            stop=stop,
-            take_profit=tp,
-            risk_usd=risk_usd,
-            size_btc=size,
-            notional=size * entry,
-            blocked=plan.blocked,
+        ask_walls = cluster_walls(
+            [(p, q, b["name"]) for b in books2 for p, q in b["asks"]], "ask"
         )
-    elif want_buy:
-        stop = entry - SL_ATR_MULT * atr
-        risk = entry - stop
-        tp = entry + RR_MULT * risk
-        size = risk_usd / risk if risk > 0 else 0.0
-        plan = TradePlan(
-            side="BUY",
-            reason=(
-                "RSI lifted from oversold (<30). Entry is live Global VWAP. "
-                "1:3 take-profit from 1.5× ATR stop."
-            ),
-            entry=entry,
-            stop=stop,
-            take_profit=tp,
-            risk_usd=risk_usd,
-            size_btc=size,
-            notional=size * entry,
-            blocked=plan.blocked,
+        still = wall_still_real(
+            decision["wall"],
+            ask_walls if decision["wall"]["side"] == "ask" else bid_walls,
         )
-    else:
-        bits = []
-        if whales.netflow <= 0:
-            bits.append("netflow not (+)")
-        if not liq.heavy_sell:
-            bits.append("no 2× sell wall")
-        if not tech.cross_below_70:
-            bits.append("RSI has not crossed below 70")
-        sell_miss = ", ".join(bits)
-        bits_b = []
-        if whales.netflow >= 0:
-            bits_b.append("netflow not (−)")
-        if not liq.heavy_buy:
-            bits_b.append("no 2× buy wall")
-        if not tech.recover_from_30:
-            bits_b.append("RSI has not lifted from <30")
-        plan.reason = f"SELL needs: {sell_miss}. BUY needs: {', '.join(bits_b)}."
-
-    # Paper position + breakeven guard (50% of path to TP → stop = entry).
-    if plan.side in {"BUY", "SELL"} and paper.side == "FLAT":
-        paper.side = plan.side
-        paper.entry = plan.entry
-        paper.stop = plan.stop
-        paper.take_profit = plan.take_profit
-        paper.size_btc = plan.size_btc
-        paper.opened_at = iso_now()
-        paper.breakeven = False
-
-    if paper.side == "SELL" and paper.entry and paper.take_profit:
-        path = paper.entry - paper.take_profit
-        if path > 0 and (paper.entry - live) >= BREAKEVEN_FRAC * path:
-            paper.stop = paper.entry
-            paper.breakeven = True
-    if paper.side == "BUY" and paper.entry and paper.take_profit:
-        path = paper.take_profit - paper.entry
-        if path > 0 and (live - paper.entry) >= BREAKEVEN_FRAC * path:
-            paper.stop = paper.entry
-            paper.breakeven = True
-
-    if paper.side == "SELL" and live >= paper.stop > 0:
-        paper.side = "FLAT"
-        paper.breakeven = False
-        plan.reason += "  Paper short stopped out."
-    if paper.side == "BUY" and 0 < live <= paper.stop:
-        paper.side = "FLAT"
-        paper.breakeven = False
-        plan.reason += "  Paper long stopped out."
-    if paper.side == "SELL" and paper.take_profit and live <= paper.take_profit:
-        paper.side = "FLAT"
-        plan.reason += "  Paper short hit TP."
-    if paper.side == "BUY" and paper.take_profit and live >= paper.take_profit:
-        paper.side = "FLAT"
-        plan.reason += "  Paper long hit TP."
-
-    plan.breakeven = paper.breakeven
-    if paper.side != "FLAT":
-        plan.stop = paper.stop
-        plan.take_profit = paper.take_profit
-        plan.entry = paper.entry
-        plan.size_btc = paper.size_btc
-        plan.notional = paper.size_btc * paper.entry
-        plan.side = paper.side if plan.side == "NONE" else plan.side
-    return plan
-
-
-# ===========================================================================
-# Terminal dashboard
-# ===========================================================================
-
-def _line(width: int, ch: str = "─") -> str:
-    return ch * width
-
-
-def render(
-    liq: LiquiditySnapshot,
-    whales: WhaleSnapshot,
-    etf: EtfSnapshot,
-    tech: TechSnapshot,
-    plan: TradePlan,
-    paper: PaperState,
-    wallet: float,
-    cycle: int,
-) -> str:
-    try:
-        cols = os.get_terminal_size().columns if sys.stdout.isatty() else 88
-    except OSError:
-        cols = 88
-    width = clamp(int(cols), 72, 110)
-    live = liq.live or tech.vwap
-    side_col = RED if plan.side == "SELL" else GRN if plan.side == "BUY" else YEL
-    lock = f"{RED}ON — no fade{RESET}" if tech.breakout_lock else f"{GRN}OFF{RESET}"
-    be = (
-        f"{GRN}ARMED — stop moved to entry (zero risk){RESET}"
-        if paper.breakeven
-        else f"{DIM}waiting for 50% path to TP{RESET}"
-    )
-
-    def box(title: str) -> str:
-        return f"{CYN}{BOLD}{title}{RESET}"
-
-    out: list[str] = []
-    out.append(f"{BLU}{BOLD}{'═' * width}{RESET}")
-    out.append(
-        f"{WHT}{BOLD}  GLOBAL CRYPTO MARKET AGGREGATOR & SIGNAL ENGINE{RESET}  {DIM}cycle {cycle} · {iso_now()}{RESET}"
-    )
-    out.append(
-        f"{DIM}  Public feeds only · Binance / Coinbase / Kraken · Mempool.space · Farside ETF · no private keys{RESET}"
-    )
-    out.append(f"{BLU}{BOLD}{'═' * width}{RESET}")
-    out.append("")
-    out.append(
-        f"  {BOLD}LIVE GLOBAL PRICE{RESET}  {WHT}{BOLD}{money(live)}{RESET}    "
-        f"VWAP {money(tech.vwap)}    spread {money(liq.spread)}"
-    )
-    out.append("")
-    out.append(box("  MODULE 1  ·  ORDER FLOW FORCE"))
-    for v in liq.venues:
-        if v.ok:
-            out.append(
-                f"    {v.name:<18} {v.symbol:<9}  bid {money(v.bid)}  ask {money(v.ask)}  "
-                f"near bids {v.bids_near:,.2f}  near asks {v.asks_near:,.2f}"
-            )
+        spoof_cleared = still
+        if not still:
+            decision = {
+                "signal": "WAIT",
+                "wall": decision["wall"],
+                "why": "Anti-spoof: the >500 BTC wall vanished or shrank inside 5 seconds. No M1 fire.",
+            }
         else:
-            out.append(f"    {v.name:<18} {RED}offline{RESET}  {DIM}{v.error}{RESET}")
-    ratio = "∞" if liq.ask_bid_ratio == float("inf") else f"{liq.ask_bid_ratio:.2f}x"
-    wall_col = RED if liq.heavy_sell else GRN if liq.heavy_buy else DIM
-    out.append(
-        f"    Combined within 1% of live → bids {liq.bids_near:,.2f} BTC   "
-        f"asks {liq.asks_near:,.2f} BTC   ratio {ratio}"
-    )
-    out.append(f"    {wall_col}{BOLD}{liq.pressure}{RESET}")
-    out.append("")
-    out.append(box("  MODULE 2  ·  WHALE INFLOW / OUTFLOW  (>100 BTC, 24h)"))
-    if whales.error:
-        out.append(f"    {YEL}feed: {whales.error}{RESET}")
-    out.append(
-        f"    Inflows  (wallet → exchange, pinasok)   {RED}{btc_fmt(whales.inflows)}{RESET}"
-    )
-    out.append(
-        f"    Outflows (exchange → wallet, nilabas)   {GRN}{btc_fmt(whales.outflows)}{RESET}"
-    )
-    nf_col = RED if whales.netflow > 0 else GRN if whales.netflow < 0 else DIM
-    out.append(f"    Netflow (in − out)  {nf_col}{BOLD}{whales.netflow:+,.4f} BTC{RESET}  {whales.sentiment}")
-    if whales.prints:
-        for p in whales.prints[:4]:
-            tag = {
-                "inflow": f"{RED}IN {RESET}",
-                "outflow": f"{GRN}OUT{RESET}",
-                "internal": f"{YEL}INT{RESET}",
-            }.get(p.kind, " · ")
-            out.append(
-                f"      {tag} {btc_fmt(p.btc):>14}  {p.origin} → {p.dest}  {DIM}{p.when}  {p.txid[:12]}…{RESET}"
-            )
-    else:
-        out.append(f"    {DIM}No >{WHALE_BTC:.0f} BTC labeled flow in the current window.{RESET}")
-    out.append("")
-    out.append(box("  MODULE 3  ·  WALL STREET ETF FORCE  (IBIT / FBTC)"))
-    etf_col = GRN if etf.sentiment.startswith("BULL") else RED if etf.sentiment.startswith("BEAR") else DIM
-    out.append(
-        f"    {etf.date}  total {money(etf.total_usd, 0)}   "
-        f"IBIT {money(etf.ibit_usd, 0)}   FBTC {money(etf.fbtc_usd, 0)}"
-    )
-    out.append(f"    {etf_col}{BOLD}{etf.sentiment}{RESET}  {DIM}{etf.source}{RESET}")
-    if etf.error:
-        out.append(f"    {YEL}{etf.error}{RESET}")
-    out.append("")
-    out.append(box("  MODULE 4  ·  MOMENTUM GUARD  (RSI 14 / ATR 14 / VWAP)"))
-    out.append(
-        f"    RSI {tech.rsi:6.2f}  (prev {tech.rsi_prev:6.2f})    "
-        f"cross below 70: {'YES' if tech.cross_below_70 else 'no':<3}    "
-        f"lift from <30: {'YES' if tech.recover_from_30 else 'no'}"
-    )
-    out.append(
-        f"    ATR {money(tech.atr)}  avg {money(tech.atr_avg)}  spike {'YES' if tech.atr_spike else 'no'}    "
-        f"5m volume {tech.volume:,.2f}    bars {tech.bars}"
-    )
-    out.append(f"    Breakout lock (RSI>75 + ATR spike): {lock}")
-    if tech.error:
-        out.append(f"    {YEL}{tech.error}{RESET}")
-    out.append("")
-    out.append(box("  MODULE 5  ·  SIGNAL MATRIX & 1:3 RISK MATH"))
-    out.append(f"    {side_col}{BOLD}SIGNAL  {plan.side}{RESET}    {plan.reason}")
-    if plan.blocked:
-        out.append(f"    {RED}{plan.blocked}{RESET}")
-    if plan.side in {"BUY", "SELL"} or paper.side != "FLAT":
-        out.append(f"    ENTRY        {money(plan.entry)}   (global VWAP)")
-        out.append(
-            f"    STOP LOSS    {money(plan.stop)}   "
-            f"({'price + 1.5×ATR' if (plan.side == 'SELL' or paper.side == 'SELL') else 'price − 1.5×ATR'})"
-        )
-        out.append(f"    TAKE PROFIT  {money(plan.take_profit)}   (3× stop distance, 1:3 R:R)")
-        out.append(
-            f"    SIZE         {btc_fmt(plan.size_btc)}    notional {money(plan.notional)}    "
-            f"risk {money(plan.risk_usd or wallet * RISK_PCT)}  (1% of {money(wallet)} wallet)"
-        )
-        out.append(f"    BREAKEVEN    {be}")
-        if paper.side != "FLAT":
-            out.append(
-                f"    PAPER        {paper.side} opened {paper.opened_at}  "
-                f"live {money(live)}"
-            )
-    out.append("")
-    out.append(
-        f"{DIM}  SELL only if netflow (+) AND 2× ask wall AND RSI crosses below 70.  "
-        f"BUY only if netflow (−) AND 2× bid wall AND RSI lifts from <30.{RESET}"
-    )
-    out.append(
-        f"{DIM}  Not financial advice. Public data can lag. Ctrl+C to stop.{RESET}"
-    )
-    out.append(_line(width))
-    return "\n".join(out)
+            decision = decide(flow, live or vwap, bar, ask_walls, bid_walls, cvd)
+            spoof_cleared = decision["signal"] in {"BUY", "SELL"}
+    plan = None
+    if decision["signal"] in {"BUY", "SELL"} and decision["wall"]:
+        plan = build_plan(decision["signal"], vwap, decision["wall"])
+    return {
+        "ok": bool(goods and bars),
+        "live": round_px(live or vwap),
+        "vwap": round_px(vwap),
+        "cvd": round_px(cvd),
+        "signal": decision["signal"],
+        "why": decision["why"],
+        "plan": plan,
+        "flow": flow,
+        "bid_walls": bid_walls[:6],
+        "ask_walls": ask_walls[:6],
+        "venues": [{"name": b["name"], "ok": b["ok"], "last": round_px(b["last"])} for b in books],
+        "spoof_checked": spoof_checked,
+        "spoof_cleared": spoof_cleared,
+        "candle": candle_key(),
+        "when": utc_now(),
+        "source": " + ".join(b["name"] for b in goods) or "none",
+    }
 
 
-# ===========================================================================
-# Main loop
-# ===========================================================================
-
-def run(once: bool, interval: float, wallet: float) -> None:
-    load_dotenv()
-    liq_eng = LiquidityAggregator()
-    chain = OnchainTracker()
-    etf_eng = EtfMonitor()
-    tech_eng = MomentumGuard()
-    paper = PaperState()
-    cycle = 0
-    prev_state = "WAIT"
-    emailed_this_arm = False
-    print(
-        f"{CYN}Booting public feeds (Binance / Coinbase / Kraken / Mempool / Farside)…{RESET}",
-        flush=True,
-    )
-    receiver = os.environ.get("EMAIL_RECEIVER") or DEFAULT_EMAIL_RECEIVER
-    if os.environ.get("EMAIL_APP_PASSWORD"):
-        print(f"{DIM}Email alerts armed → {receiver} via Gmail SMTP 587 TLS{RESET}", flush=True)
-    else:
-        print(
-            f"{YEL}EMAIL_APP_PASSWORD empty — HOLDING→SELL will ping the desk but skip SMTP.{RESET}",
-            flush=True,
+def render(snap: dict[str, Any]) -> str:
+    lines = [
+        f"Whale Signal Desk  M1  {snap['when']}",
+        f"live ${snap['live']:,.2f}  VWAP ${snap['vwap']:,.2f}  CVD {snap['cvd']:.2f}",
+        f"inflow {snap['flow']['inflows']:.2f} BTC  outflow {snap['flow']['outflows']:.2f} BTC",
+        f"signal {snap['signal']}  {snap['why']}",
+        f"venues {snap['source']}",
+    ]
+    if snap["plan"]:
+        p = snap["plan"]
+        lines.append(
+            f"{p['side']} ENTRY ${p['entry']:,.2f}  SL ${p['stop']:,.2f}  TP ${p['takeProfit']:,.2f}  size {p['sizeBtc']:.6f} BTC"
         )
+    for wall in snap["ask_walls"][:3]:
+        tag = "WHALE" if wall["whale"] else "size"
+        lines.append(f"ASK {tag} ${wall['price']:,.2f}  {wall['btc']:.0f} BTC")
+    for wall in snap["bid_walls"][:3]:
+        tag = "WHALE" if wall["whale"] else "size"
+        lines.append(f"BID {tag} ${wall['price']:,.2f}  {wall['btc']:.0f} BTC")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="M1 whale confluence bot")
+    parser.add_argument("--once", action="store_true")
+    args = parser.parse_args()
+    emailed_candle: int | None = None
     while True:
-        cycle += 1
-        try:
-            liq = liq_eng.fetch()
-        except Exception as exc:  # noqa: BLE001
-            liq = LiquiditySnapshot(pressure=f"error {exc}")
-        try:
-            whales = chain.fetch()
-        except Exception as exc:  # noqa: BLE001
-            whales = WhaleSnapshot(error=str(exc)[:160])
-        try:
-            etf = etf_eng.fetch()
-        except Exception as exc:  # noqa: BLE001
-            etf = EtfSnapshot(error=str(exc)[:160])
-        try:
-            tech = tech_eng.fetch()
-        except Exception as exc:  # noqa: BLE001
-            tech = TechSnapshot(error=str(exc)[:160])
-
-        live = liq.live or tech.vwap
-        plan = build_plan(liq, whales, tech, wallet, live, paper)
-        current = "HOLD" if tech.breakout_lock else ("SELL" if plan.side == "SELL" else "WAIT")
-        if prev_state == "HOLD" and current == "SELL" and not emailed_this_arm:
-            status = send_email_alert(
-                entry=plan.entry,
-                take_profit=plan.take_profit,
-                stop=plan.stop,
-                size_btc=plan.size_btc,
-                rsi=tech.rsi,
-                atr=tech.atr,
-                vwap=tech.vwap or live,
-                when=iso_now(),
-            )
-            print(f"{CYN}HOLDING → SELL / SHORT SETUP email: {status}{RESET}", flush=True)
-            emailed_this_arm = True
-        if current == "HOLD":
-            emailed_this_arm = False
-        prev_state = current
-        frame = render(liq, whales, etf, tech, plan, paper, wallet, cycle)
-        if sys.stdout.isatty() and not once:
-            sys.stdout.write("\033[2J\033[H")
-        print(frame, flush=True)
-        if once:
-            return
-        time.sleep(max(1.0, interval))
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Global Crypto Market Aggregator & Signal Engine (public data only)"
-    )
-    p.add_argument("--once", action="store_true", help="one dashboard frame then exit")
-    p.add_argument("--interval", type=float, default=LOOP_SEC, help="seconds between frames")
-    p.add_argument("--wallet", type=float, default=WALLET_USD, help="paper wallet USD")
-    return p.parse_args(argv)
-
-
-def main() -> None:
-    args = parse_args()
-    try:
-        run(once=args.once, interval=args.interval, wallet=args.wallet)
-    except KeyboardInterrupt:
-        print(f"\n{DIM}Stopped.{RESET}")
+        snap = snapshot()
+        print("\n" + render(snap), flush=True)
+        if snap["signal"] in {"BUY", "SELL"} and snap["plan"] and emailed_candle != snap["candle"]:
+            status = send_email_alert(snap["plan"], snap)
+            emailed_candle = snap["candle"]
+            print(f"email {status}  subject {M1_ALERT_SUBJECT}", flush=True)
+        if args.once:
+            return 0 if snap["ok"] else 1
+        time.sleep(LOOP_SEC)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

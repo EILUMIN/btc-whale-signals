@@ -1,6 +1,6 @@
 import { WHALE_THRESHOLD_BTC } from "@/lib/constants";
 import type { ClassifiedTx } from "@/lib/classify";
-import { roundPrice, type HourlyCandle } from "@/lib/price";
+import { roundPrice } from "@/lib/price";
 import type { KeyLevel, SignalSide } from "@/lib/types";
 
 export type DirectionalDecision = {
@@ -9,20 +9,15 @@ export type DirectionalDecision = {
   keyLevel: KeyLevel;
 };
 
-function averageTrueRange(candles: HourlyCandle[]) {
-  if (candles.length === 0) return null;
-  const ranges = candles.map((candle) => candle.high - candle.low);
-  return ranges.reduce((sum, value) => sum + value, 0) / ranges.length;
-}
+const ZONE_PCT = 0.0025;
 
 export function decideSignal(
   classified: ClassifiedTx,
   priceUsd: number,
-  candles: HourlyCandle[],
+  _unusedCandles: unknown,
   thresholdBtc = WHALE_THRESHOLD_BTC
 ): DirectionalDecision {
-  const atr = averageTrueRange(candles) ?? priceUsd * 0.006;
-  const buffer = Math.max(atr * 0.35, priceUsd * 0.002);
+  const buffer = Math.max(priceUsd * ZONE_PCT, 50);
 
   if (classified.movement === "Wallet to Exchange") {
     const resistance = roundPrice(priceUsd);

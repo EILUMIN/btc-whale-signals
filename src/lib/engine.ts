@@ -21,13 +21,7 @@ import {
   explorerTxUrl,
 } from "@/lib/mempool";
 import { sleep } from "@/lib/http";
-import {
-  fetchLivePrice,
-  fetchPriceAtUnix,
-  fetchRecentHourlies,
-  roundPrice,
-  type HourlyCandle,
-} from "@/lib/price";
+import { fetchLivePrice, fetchPriceAtUnix, roundPrice } from "@/lib/price";
 import { decideSignal } from "@/lib/signals";
 import type {
   EngineSnapshot,
@@ -55,7 +49,6 @@ export class WhaleEngine {
   private signals = new Map<string, WhaleSignal>();
   private tape: TapePrint[] = [];
   private price: LivePrice | null = null;
-  private candles: HourlyCandle[] = [];
   private lastScanAt: string | null = null;
   private scanning = false;
   private liveFeed = false;
@@ -133,9 +126,6 @@ export class WhaleEngine {
   async refreshPrice() {
     try {
       this.price = await fetchLivePrice();
-      if (this.candles.length === 0) {
-        this.candles = await fetchRecentHourlies();
-      }
       this.error = null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -149,9 +139,6 @@ export class WhaleEngine {
     this.log(`Scan (${reason})…`);
     try {
       await this.refreshPrice();
-      if (this.candles.length === 0) {
-        this.candles = await fetchRecentHourlies();
-      }
 
       const recent = await fetchMempoolRecent();
       for (const tx of recent) {
@@ -361,7 +348,7 @@ export class WhaleEngine {
     const decision = decideSignal(
       classified,
       priceUsd,
-      this.candles,
+      undefined,
       this.thresholdBtc
     );
 
