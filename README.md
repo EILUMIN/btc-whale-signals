@@ -37,7 +37,26 @@ Price Level: $...
 Signal Recommendation: BUY o SELL
 ```
 
-## Patakbuhin
+## Python signal engine (`master_bot.py`)
+
+Isang file na Global Crypto Market Aggregator & Signal Engine. Public data lang — walang private API keys.
+
+```bash
+pip install -r requirements-bot.txt
+python3 master_bot.py
+python3 master_bot.py --once          # isang frame, tapos exit
+python3 master_bot.py --wallet 1000
+```
+
+- **Module 1** Binance + Coinbase + Kraken order books (ccxt). Binance.US fallback kung naka-block ang Binance.com (Canada).
+- **Module 2** Whale inflow/outflow >100 BTC via Mempool.space. Netflow = in − out.
+- **Module 3** US spot BTC ETF daily net (Farside; SoSoValue fallback). ≥$100M inflow = BULLISH APPRECIATION.
+- **Module 4** Combined RSI(14), ATR(14), VWAP. Walang SELL kung RSI>75 + ATR spike. SELL only after RSI crosses back below 70.
+- **Module 5** 1:3 R:R, 1% risk sa $1,000 wallet, breakeven guard at 50% to TP.
+
+Hindi ito financial advice.
+
+## Web desk
 
 Kailangan: Node.js 20+
 
