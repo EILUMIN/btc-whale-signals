@@ -72,13 +72,6 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
     setTimeout(() => setCopied(false), 1600);
   }
 
-  const levelLabel =
-    signal.keyLevel.kind === "resistance"
-      ? t.estimatedResistance
-      : signal.keyLevel.kind === "support"
-        ? t.estimatedSupport
-        : t.keyLevel;
-
   return (
     <Card className={`border ${accent} shadow-none`}>
       <CardContent className="space-y-4">
@@ -103,12 +96,6 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <div className="space-y-1">
             <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-              {t.timestamp}
-            </dt>
-            <dd className="font-mono">{formatTimestamp(signal.timestampUnix)}</dd>
-          </div>
-          <div className="space-y-1">
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">
               {t.sizeAndMove}
             </dt>
             <dd>
@@ -121,39 +108,13 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
           </div>
           <div className="space-y-1">
             <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-              {t.priceLevel}
-            </dt>
-            <dd className="font-mono">
-              {formatUsd(signal.priceUsd)}
-              <span className="ml-2 text-xs text-muted-foreground">
-                {signal.priceSource}
-              </span>
-            </dd>
-          </div>
-          <div className="space-y-1">
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">
               {t.signalRecommendation}
             </dt>
             <dd className="font-semibold">{signal.recommendation}</dd>
           </div>
-          <div className="space-y-1 sm:col-span-2">
-            <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-              {levelLabel}
-            </dt>
-            <dd className="font-mono">
-              {formatUsd(signal.keyLevel.price)}
-              {signal.keyLevel.kind !== "none" && (
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {t.zone} {formatUsd(signal.keyLevel.zoneLow)} –{" "}
-                  {formatUsd(signal.keyLevel.zoneHigh)}
-                </span>
-              )}
-            </dd>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {noteForSignal(t, signal)}
-            </p>
-          </div>
         </dl>
+
+        <LevelMap signal={signal} t={t} />
 
         <div className="grid gap-3 rounded-lg border border-border/70 bg-background/40 p-3 text-xs sm:grid-cols-2">
           <AddressList title={t.from} rows={signal.from} t={t} />
@@ -177,6 +138,77 @@ export function WhaleAlertCard({ signal }: { signal: WhaleSignal }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function LevelMap({
+  signal,
+  t,
+}: {
+  signal: WhaleSignal;
+  t: Dictionary;
+}) {
+  const placed = formatUsd(signal.priceUsd);
+  const stop =
+    signal.keyLevel.kind === "resistance"
+      ? formatUsd(signal.keyLevel.zoneHigh)
+      : signal.keyLevel.kind === "support"
+        ? formatUsd(signal.keyLevel.zoneLow)
+        : placed;
+  const stopCopy =
+    signal.keyLevel.kind === "resistance"
+      ? interpolate(t.resistanceStops, { placed, stop })
+      : signal.keyLevel.kind === "support"
+        ? interpolate(t.supportStops, { placed, stop })
+        : t.watchNoStop;
+  const rangeLabel =
+    signal.keyLevel.kind === "none"
+      ? placed
+      : `${formatUsd(signal.keyLevel.zoneLow)} → ${formatUsd(signal.keyLevel.zoneHigh)}`;
+
+  return (
+    <div className="space-y-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">
+        {t.levelMap}
+      </p>
+      <dl className="grid gap-3 text-sm sm:grid-cols-3">
+        <div className="space-y-1">
+          <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.placedWhen}
+          </dt>
+          <dd className="font-mono text-xs sm:text-sm">
+            {formatTimestamp(signal.timestampUnix)}
+          </dd>
+        </div>
+        <div className="space-y-1">
+          <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.placedAt}
+          </dt>
+          <dd className="font-mono text-base font-semibold">{placed}</dd>
+          <dd className="text-[11px] text-muted-foreground">{signal.priceSource}</dd>
+        </div>
+        <div className="space-y-1">
+          <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.stopsAt}
+          </dt>
+          <dd className="font-mono text-base font-semibold">{stop}</dd>
+          <dd className="text-[11px] text-muted-foreground">
+            {signal.keyLevel.kind === "resistance"
+              ? t.estimatedResistance
+              : signal.keyLevel.kind === "support"
+                ? t.estimatedSupport
+                : t.keyLevel}
+          </dd>
+        </div>
+      </dl>
+      <p className="font-mono text-xs text-muted-foreground">
+        {t.zone}: {rangeLabel}
+      </p>
+      <p className="text-xs leading-relaxed text-muted-foreground">{stopCopy}</p>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        {noteForSignal(t, signal)}
+      </p>
+    </div>
   );
 }
 

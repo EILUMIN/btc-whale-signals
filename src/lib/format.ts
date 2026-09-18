@@ -33,12 +33,19 @@ export function shortenAddress(address: string) {
 
 export function formatAlert(signal: WhaleSignal, language: Language = "fil") {
   const t = dictionaries[language];
-  const levelLine =
+  const placed = formatUsd(signal.priceUsd);
+  const stop =
     signal.keyLevel.kind === "resistance"
-      ? `${t.estimatedResistance}: ${formatUsd(signal.keyLevel.price)} (${t.zone} ${formatUsd(signal.keyLevel.zoneLow)} – ${formatUsd(signal.keyLevel.zoneHigh)})`
+      ? formatUsd(signal.keyLevel.zoneHigh)
       : signal.keyLevel.kind === "support"
-        ? `${t.estimatedSupport}: ${formatUsd(signal.keyLevel.price)} (${t.zone} ${formatUsd(signal.keyLevel.zoneLow)} – ${formatUsd(signal.keyLevel.zoneHigh)})`
-        : `${t.keyLevel}: ${formatUsd(signal.keyLevel.price)}`;
+        ? formatUsd(signal.keyLevel.zoneLow)
+        : placed;
+  const stopLine =
+    signal.keyLevel.kind === "resistance"
+      ? `${t.stopsAt}: ${stop} (${t.estimatedResistance})`
+      : signal.keyLevel.kind === "support"
+        ? `${t.stopsAt}: ${stop} (${t.estimatedSupport})`
+        : `${t.stopsAt}: ${t.watchNoStop}`;
 
   const fromLabel = signal.primaryFrom.entity
     ? signal.primaryFrom.entity
@@ -47,11 +54,12 @@ export function formatAlert(signal: WhaleSignal, language: Language = "fil") {
 
   return [
     "🚨 BTC WHALE ALERT 🚨",
-    `${t.timestamp}: ${formatTimestamp(signal.timestampUnix)}`,
-    `${t.sizeAndMove}: ${formatBtc(signal.btcAmount)} · ${signal.movement} (${fromLabel} → ${toLabel})`,
-    `${t.priceLevel}: ${formatUsd(signal.priceUsd)}`,
     `${t.signalRecommendation}: ${signal.recommendation}`,
-    levelLine,
+    `${t.sizeAndMove}: ${formatBtc(signal.btcAmount)} · ${signal.movement} (${fromLabel} → ${toLabel})`,
+    `${t.placedWhen}: ${formatTimestamp(signal.timestampUnix)}`,
+    `${t.placedAt}: ${placed}`,
+    stopLine,
+    `${t.zone}: ${formatUsd(signal.keyLevel.zoneLow)} – ${formatUsd(signal.keyLevel.zoneHigh)}`,
   ].join("\n");
 }
 
@@ -79,9 +87,9 @@ export function formatAlertTerminal(signal: WhaleSignal) {
     `${ANSI.dim}Price Level:${ANSI.reset} ${formatUsd(signal.priceUsd)} (${signal.priceSource})`,
     `${ANSI.dim}Signal Recommendation:${ANSI.reset} ${color}${ANSI.bold}${signal.recommendation}${ANSI.reset}`,
     signal.keyLevel.kind === "resistance"
-      ? `${ANSI.dim}Tinatayang Resistance:${ANSI.reset} ${formatUsd(signal.keyLevel.price)}`
+      ? `${ANSI.dim}Saan nila nilagay:${ANSI.reset} ${formatUsd(signal.priceUsd)}\n${ANSI.dim}Hanggang saan hihinto:${ANSI.reset} ${formatUsd(signal.keyLevel.zoneHigh)}`
       : signal.keyLevel.kind === "support"
-        ? `${ANSI.dim}Tinatayang Support:${ANSI.reset} ${formatUsd(signal.keyLevel.price)}`
+        ? `${ANSI.dim}Saan nila nilagay:${ANSI.reset} ${formatUsd(signal.priceUsd)}\n${ANSI.dim}Hanggang saan hihinto:${ANSI.reset} ${formatUsd(signal.keyLevel.zoneLow)}`
         : `${ANSI.dim}Key Level:${ANSI.reset} ${formatUsd(signal.keyLevel.price)}`,
     `${ANSI.cyan}Tx:${ANSI.reset} ${signal.explorerUrl}`,
   ].join("\n");

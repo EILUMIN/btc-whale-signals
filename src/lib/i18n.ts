@@ -38,9 +38,9 @@ export const dictionaries = {
     waitingTape: "Waiting for mempool prints…",
     howToRead: "How to read this",
     inflowExplain:
-      "Inflow to an exchange → SELL / SHORT SETUP and resistance at the transfer price.",
+      "Inflow to an exchange → SELL. They placed resistance at that price; it may stop up to the high of the zone.",
     outflowExplain:
-      "Outflow from an exchange to a wallet → BUY / ACCUMULATION and support at the transfer price.",
+      "Outflow from an exchange to a wallet → BUY. They placed support at that price; it may hold down to the low of the zone.",
     inflow: "Inflow",
     outflow: "Outflow",
     timestamp: "Time (Timestamp)",
@@ -51,6 +51,16 @@ export const dictionaries = {
     estimatedSupport: "Estimated Support",
     keyLevel: "Key Level",
     zone: "zone",
+    levelMap: "Whale price level",
+    placedWhen: "When they placed it",
+    placedAt: "Level they placed",
+    stopsAt: "Where it may stop",
+    resistanceStops:
+      "Resistance from {placed} up to {stop}. Price may stall or reverse near {stop}.",
+    supportStops:
+      "Support from {placed} down to {stop}. Price may stall or bounce near {stop}.",
+    watchNoStop:
+      "No buy/sell stop level — destination is not a clear exchange flow.",
     from: "From",
     to: "To",
     noAddress: "No address data",
@@ -110,9 +120,9 @@ export const dictionaries = {
     waitingTape: "Naghihintay ng mempool prints…",
     howToRead: "Paano binabasa",
     inflowExplain:
-      "Inflow papuntang exchange → SELL / SHORT SETUP at resistance sa price level ng transaksyon.",
+      "Inflow papuntang exchange → SELL. Doon nila nilagay ang resistance; hihinto (posible) hanggang sa taas ng zone.",
     outflowExplain:
-      "Outflow palabas ng exchange papuntang wallet → BUY / ACCUMULATION at support sa price level ng transaksyon.",
+      "Outflow palabas ng exchange papuntang wallet → BUY. Doon nila nilagay ang support; hihinto (posible) hanggang sa baba ng zone.",
     inflow: "Inflow",
     outflow: "Outflow",
     timestamp: "Oras (Timestamp)",
@@ -123,6 +133,16 @@ export const dictionaries = {
     estimatedSupport: "Tinatayang Support",
     keyLevel: "Key Level",
     zone: "zone",
+    levelMap: "Price level ng whale",
+    placedWhen: "Kailan nila inilagay",
+    placedAt: "Saan nila nilagay ang level",
+    stopsAt: "Hanggang saan hihinto",
+    resistanceStops:
+      "Resistance mula {placed} pataas hanggang {stop}. Dito pwedeng tumigil o mag-reverse ang taas.",
+    supportStops:
+      "Support mula {placed} pababa hanggang {stop}. Dito pwedeng tumigil o mag-bounce ang bagsak.",
+    watchNoStop:
+      "Walang buy/sell na stop level — hindi malinaw ang galaw papunta/palabas ng exchange.",
     from: "Mula (from)",
     to: "Papunta (to)",
     noAddress: "Walang address data",
