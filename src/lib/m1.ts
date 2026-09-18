@@ -107,8 +107,9 @@ export function clusterWalls(
     { btc: number; low: number; high: number; venues: Set<string> }
   >();
   for (const row of levels) {
-    if (!(row.price > 0) || !(row.btc > 0)) continue;
+    if (!(row.price >= bucketUsd) || !(row.btc > 0)) continue;
     const key = Math.round(row.price / bucketUsd) * bucketUsd;
+    if (!(key >= bucketUsd)) continue;
     const cur = buckets.get(key) ?? {
       btc: 0,
       low: row.price,
@@ -131,7 +132,7 @@ export function clusterWalls(
       venues: [...cur.venues],
       whale: cur.btc >= WALL_BTC,
     }))
-    .filter((wall) => wall.btc >= NOTABLE_WALL_BTC)
+    .filter((wall) => wall.btc >= NOTABLE_WALL_BTC && wall.price >= bucketUsd)
     .sort((a, b) => b.btc - a.btc);
 }
 

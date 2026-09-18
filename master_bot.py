@@ -191,7 +191,11 @@ def pull_ohlcv(exchange_id: str, symbol: str) -> list[list[float]]:
 def cluster_walls(levels: list[tuple[float, float, str]], side: str) -> list[dict[str, Any]]:
     buckets: dict[float, dict[str, Any]] = {}
     for price, btc, venue in levels:
+        if price < WALL_BUCKET or btc <= 0:
+            continue
         key = round(price / WALL_BUCKET) * WALL_BUCKET
+        if key < WALL_BUCKET:
+            continue
         cur = buckets.get(key)
         if cur is None:
             cur = {"btc": 0.0, "low": price, "high": price, "venues": set()}

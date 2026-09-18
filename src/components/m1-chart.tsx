@@ -40,10 +40,9 @@ export function M1Chart({
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
 
-  const wallPrices = walls.flatMap((w) => [w.priceLow, w.priceHigh]);
   const lows = slice.map((b) => b.low);
   const highs = slice.map((b) => b.high);
-  const extras = [live, vwap, entry, stop, takeProfit, ...wallPrices].filter(
+  const extras = [live, vwap, entry, stop, takeProfit].filter(
     (n): n is number => typeof n === "number" && n > 0
   );
   const min = Math.min(...lows, ...extras);
@@ -54,6 +53,9 @@ export function M1Chart({
   const y = (price: number) =>
     padT + ((yMax - price) / (yMax - yMin)) * plotH;
   const candleW = Math.max(plotW / slice.length - 2, 3);
+  const visibleWalls = walls.filter(
+    (wall) => wall.priceHigh >= yMin && wall.priceLow <= yMax
+  );
 
   const ticks = 4;
   const yTicks = Array.from({ length: ticks + 1 }, (_, i) => {
@@ -98,7 +100,7 @@ export function M1Chart({
           </g>
         ))}
 
-        {walls.slice(0, 10).map((wall) => {
+        {visibleWalls.slice(0, 10).map((wall) => {
           const top = y(wall.priceHigh);
           const bot = y(wall.priceLow);
           const h = Math.max(bot - top, 6);

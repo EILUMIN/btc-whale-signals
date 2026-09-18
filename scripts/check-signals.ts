@@ -59,9 +59,13 @@ const clustered = clusterWalls(
     { price: 64000, btc: 200, venue: "binance" },
     { price: 64010, btc: 350, venue: "coinbase" },
     { price: 64100, btc: 90, venue: "kraken" },
+    { price: 12, btc: 90000, venue: "coinbase" },
   ],
   "bid"
 );
+if (clustered.some((w) => w.price < 25)) {
+  throw new Error("penny bids must not become a $0 whale wall");
+}
 const whale = clustered.find((w) => w.price === 64000);
 if (!whale || whale.btc < 500) {
   throw new Error(`expected clustered 64000 wall >=500, got ${JSON.stringify(clustered)}`);
