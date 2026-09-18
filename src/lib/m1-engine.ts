@@ -9,6 +9,7 @@ import {
   clusterWalls,
   cvdFromBars,
   decideM1Confluence,
+  toPuPrimePlan,
   wallStillReal,
   type M1Bar,
   type M1Snapshot,
@@ -361,6 +362,7 @@ export async function getM1Snapshot(options?: {
         ? buildWallPlan(decision.signal, live_vwap, decision.wall)
         : null
       : null;
+  const puPrimePlan = armedPlan ? toPuPrimePlan(armedPlan) : null;
 
   const errors = venues
     .filter((v) => !v.ok)
@@ -380,6 +382,7 @@ export async function getM1Snapshot(options?: {
     spoofChecked,
     spoofCleared,
     armedPlan,
+    puPrimePlan,
     walls,
     askWalls,
     bidWalls,
@@ -414,6 +417,7 @@ export function emptyM1Snapshot(error: string): M1Snapshot {
     spoofChecked: false,
     spoofCleared: false,
     armedPlan: null,
+    puPrimePlan: null,
     walls: [],
     askWalls: [],
     bidWalls: [],

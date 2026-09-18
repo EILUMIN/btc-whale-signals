@@ -1,8 +1,13 @@
 import {
+  PU_PRIME_GAP_USD,
+  PU_PRIME_SPREAD_USD,
   buildWallPlan,
   clusterWalls,
   cvdFromBars,
   decideM1Confluence,
+  lotsGuide,
+  puPrimeQuote,
+  toPuPrimePlan,
   wallStillReal,
   type M1Bar,
   type OnchainFlow,
@@ -147,6 +152,29 @@ if (Math.abs(sellPlan.takeProfit - (65_000 - 3 * (sellPlan.stop - 65_000))) > 0.
   throw new Error(`sell TP ${sellPlan.takeProfit}`);
 }
 
+const puBuy = toPuPrimePlan(plan);
+if (!puBuy) throw new Error("pu prime buy plan");
+if (puBuy.entry !== plan.entry - PU_PRIME_GAP_USD) {
+  throw new Error(`PU Prime entry should be exchange − $${PU_PRIME_GAP_USD}, got ${puBuy.entry}`);
+}
+if (puBuy.stop !== plan.stop - PU_PRIME_GAP_USD - PU_PRIME_SPREAD_USD) {
+  throw new Error(`PU Prime BUY stop should pad $${PU_PRIME_SPREAD_USD} spread, got ${puBuy.stop}`);
+}
+if (puBuy.riskUsd !== 10) throw new Error("PU Prime max risk must stay $10");
+if (Math.abs(puBuy.sizeLots * (puBuy.entry - puBuy.stop) - 10) > 0.6) {
+  throw new Error(`lots should risk ~$10, got ${puBuy.sizeLots * (puBuy.entry - puBuy.stop)}`);
+}
+if (lotsGuide(0.04) !== "Use 0.04 Lots") throw new Error(lotsGuide(0.04));
+if (puPrimeQuote(80_915.18) !== 80_785.18) {
+  throw new Error(`gap quote ${puPrimeQuote(80_915.18)}`);
+}
+
+const puSell = toPuPrimePlan(sellPlan);
+if (!puSell) throw new Error("pu prime sell plan");
+if (puSell.stop !== sellPlan.stop - PU_PRIME_GAP_USD + PU_PRIME_SPREAD_USD) {
+  throw new Error(`PU Prime SELL stop ${puSell.stop}`);
+}
+
 if (
   wallStillReal(wall("ask", 65000, 600), [wall("ask", 65020, 500)]) === false
 ) {
@@ -193,6 +221,7 @@ const mail = formatM1Email(plan, {
   spoofChecked: true,
   spoofCleared: true,
   armedPlan: plan,
+  puPrimePlan: toPuPrimePlan(plan),
   walls: [],
   askWalls: [],
   bidWalls: [],
@@ -215,6 +244,13 @@ if (!mail.text.includes("Take Profit (1:3 R:R)")) throw new Error("tp line");
 if (!mail.text.includes("Stop (other side of whale wall)")) {
   throw new Error("sl line");
 }
+if (!mail.text.includes("Exchange Levels (Binance/Coinbase Data)")) {
+  throw new Error("exchange book label");
+}
+if (!mail.text.includes("PuPrime Levels (MT4/MT5 Guide)")) {
+  throw new Error("puprime book label");
+}
+if (!mail.text.includes("Lots")) throw new Error("lots in email");
 
 const recent = mempoolUrl("/mempool/recent");
 if (!recent.startsWith("https://mempool.space/api/mempool/recent")) {

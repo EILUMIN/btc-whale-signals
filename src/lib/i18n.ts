@@ -65,6 +65,14 @@ export const dictionaries = {
       "M1 confluence is waiting. No trade from a stale print or a spoofed wall.",
     profitNote:
       "Risk is $10 (1% of a $1,000 wallet). Stop sits on the far side of the whale wall. Target is 3× that distance. Not financial advice.",
+    exchangeLevels: "Exchange Levels (Binance/Coinbase Data)",
+    puPrimeLevels: "PuPrime Levels (MT4/MT5 Guide)",
+    puPrimeLive: "PU Prime guide",
+    puPrimeGapHint: "−$130 gap vs exchange · $17 spread",
+    puPrimeWait:
+      "When a signal fires, this box splits into exchange levels for the bot and PU Prime MT4/MT5 levels (−$130 gap, $17 spread, size in lots, $10 max risk).",
+    sizeLots: "VOLUME · Lots",
+    lotsGuide: "Use {lots} Lots",
     howToRead: "How to read this",
     inflowExplain:
       "SELL only: on-chain inflow >500 BTC into an exchange AND price tags a >500 BTC ask wall AND CVD is selling.",
@@ -72,6 +80,8 @@ export const dictionaries = {
       "BUY only: on-chain outflow >500 BTC off an exchange AND price leans on a >500 BTC bid wall AND CVD is buying.",
     spoofExplain:
       "Inside the current M1 candle the desk waits 5 seconds and re-reads the book. If the wall shrinks or disappears, it was spoofing — no email, no ping.",
+    puPrimeExplain:
+      "PU Prime prints about $130 below Binance/Coinbase, with a $17 spread. Exchange levels stay on bot data. The MT4/MT5 guide subtracts $130, pads the stop for spread, keeps $10 max risk, and sizes in lots.",
     inflow: "Inflow",
     outflow: "Outflow",
     language: "Language",
@@ -145,6 +155,14 @@ export const dictionaries = {
       "Naghihintay ang M1 confluence. Walang trade mula sa lumang print o pekeng pader.",
     profitNote:
       "$10 ang risk (1% ng $1,000 wallet). Stop ay sa kabilang panig ng whale wall. Target ay 3× nun. Hindi financial advice.",
+    exchangeLevels: "Exchange Levels (Binance/Coinbase Data)",
+    puPrimeLevels: "PuPrime Levels (MT4/MT5 Guide)",
+    puPrimeLive: "PU Prime guide",
+    puPrimeGapHint: "−$130 gap vs exchange · $17 spread",
+    puPrimeWait:
+      "Kapag mag-fire ang signal, maghihiwalay ang box: exchange levels para sa bot, at PU Prime MT4/MT5 levels (−$130 gap, $17 spread, size sa lots, $10 max risk).",
+    sizeLots: "VOLUME · Lots",
+    lotsGuide: "Use {lots} Lots",
     howToRead: "Paano binabasa",
     inflowExplain:
       "SELL lang: on-chain inflow >500 BTC papuntang exchange AT tumama ang presyo sa >500 BTC ask wall AT selling ang CVD.",
@@ -152,6 +170,8 @@ export const dictionaries = {
       "BUY lang: on-chain outflow >500 BTC palabas ng exchange AT sumandal ang presyo sa >500 BTC bid wall AT buying ang CVD.",
     spoofExplain:
       "Sa loob ng kasalukuyang M1 candle, maghihintay ng 5 segundo at babasahin ulit ang book. Kung lumiit o nawala ang pader, spoofing iyon — walang email, walang ping.",
+    puPrimeExplain:
+      "Mga $130 ang baba ng PU Prime vs Binance/Coinbase, plus $17 spread. Exchange levels ang bot. Ang MT4/MT5 guide ay minus $130, pad ng spread sa stop, $10 max risk, at lots ang size.",
     inflow: "Inflow",
     outflow: "Outflow",
     language: "Wika",

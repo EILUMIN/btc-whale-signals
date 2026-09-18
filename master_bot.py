@@ -45,6 +45,9 @@ SPOOF_KEEP = 0.8
 WALLET_USD = 1_000.0
 RISK_USD = 10.0
 RR_MULT = 3.0
+PU_PRIME_GAP_USD = 130.0
+PU_PRIME_SPREAD_USD = 17.0
+LOT_STEP = 0.01
 BOOK_LIMIT = 500
 M1_LIMIT = 90
 FLOW_WINDOW_SEC = 60 * 60
@@ -267,8 +270,49 @@ def build_plan(side: str, vwap: float, wall: dict[str, Any]) -> dict[str, Any] |
         "wallPrice": wall["price"],
         "riskUsd": RISK_USD,
         "sizeBtc": size,
+        "sizeLots": btc_to_lots(size),
         "notionalUsd": round_px(size * entry),
         "rr": RR_MULT,
+    }
+
+
+def btc_to_lots(size_btc: float) -> float:
+    if size_btc <= 0:
+        return 0.0
+    lots = round(size_btc / LOT_STEP) * LOT_STEP
+    return round(max(lots, LOT_STEP), 2)
+
+
+def to_puprime_plan(plan: dict[str, Any]) -> dict[str, Any] | None:
+    entry = round_px(plan["entry"] - PU_PRIME_GAP_USD)
+    stop = (
+        round_px(plan["stop"] - PU_PRIME_GAP_USD - PU_PRIME_SPREAD_USD)
+        if plan["side"] == "BUY"
+        else round_px(plan["stop"] - PU_PRIME_GAP_USD + PU_PRIME_SPREAD_USD)
+    )
+    risk_per = round_px(abs(entry - stop))
+    if risk_per < 1:
+        return None
+    if plan["side"] == "SELL" and stop <= entry:
+        return None
+    if plan["side"] == "BUY" and stop >= entry:
+        return None
+    size = round(RISK_USD / risk_per, 6)
+    lots = btc_to_lots(size)
+    tp = round_px(entry - RR_MULT * risk_per) if plan["side"] == "SELL" else round_px(entry + RR_MULT * risk_per)
+    return {
+        "side": plan["side"],
+        "entry": entry,
+        "stop": stop,
+        "takeProfit": tp,
+        "wallPrice": round_px(plan["wallPrice"] - PU_PRIME_GAP_USD),
+        "riskUsd": RISK_USD,
+        "sizeBtc": size,
+        "sizeLots": lots,
+        "notionalUsd": round_px(lots * entry),
+        "rr": RR_MULT,
+        "gap": PU_PRIME_GAP_USD,
+        "spread": PU_PRIME_SPREAD_USD,
     }
 
 
@@ -468,20 +512,33 @@ def send_email_alert(plan: dict[str, Any], snap: dict[str, Any]) -> str:
     receiver = os.environ.get("EMAIL_RECEIVER", "").strip() or DEFAULT_EMAIL_RECEIVER
     if not sender or not password:
         return "skipped"
+    pu = snap.get("pu_plan")
+    pu_block = ""
+    if pu:
+        pu_block = (
+            "PuPrime Levels (MT4/MT5 Guide)\n"
+            f"Entry: ${pu['entry']:,.2f}  (−${pu['gap']:.0f} gap vs exchange)\n"
+            f"Stop (other side of wall + ${pu['spread']:.0f} spread): ${pu['stop']:,.2f}\n"
+            f"Take Profit (1:3 R:R): ${pu['takeProfit']:,.2f}\n"
+            f"Volume: Use {pu['sizeLots']:.2f} Lots\n"
+            f"Risk: ${pu['riskUsd']:.2f}\n\n"
+        )
     body = (
         f"{M1_ALERT_SUBJECT}\n\n"
         f"{plan['side']} confluence on the 1-minute chart.\n"
         "On-chain flow + order-book wall + CVD agreed. 5-second anti-spoof passed.\n\n"
-        f"Side: {plan['side']}\n"
+        f"Side: {plan['side']}\n\n"
+        "Exchange Levels (Binance/Coinbase Data)\n"
         f"Entry (Global VWAP at trigger): ${plan['entry']:,.2f}\n"
         f"Stop (other side of whale wall): ${plan['stop']:,.2f}\n"
         f"Take Profit (1:3 R:R): ${plan['takeProfit']:,.2f}\n"
         f"Safe size (1% of $1,000): {plan['sizeBtc']:.6f} BTC\n"
-        f"Whale wall: ${plan['wallPrice']:,.2f}\n"
+        f"Whale wall: ${plan['wallPrice']:,.2f}\n\n"
+        f"{pu_block}"
         f"On-chain inflow: {snap['flow']['inflows']:.2f} BTC\n"
         f"On-chain outflow: {snap['flow']['outflows']:.2f} BTC\n"
         f"CVD (M1): {snap['cvd']:.2f}\n"
-        f"Live price: ${snap['live']:.2f}\n"
+        f"Live price: ${snap['live']:,.2f}\n"
         f"when: {snap['when']}\n\n"
         "Not financial advice.\n"
     )
@@ -556,8 +613,10 @@ def snapshot(skip_spoof: bool = False) -> dict[str, Any]:
             decision = decide(flow, live or vwap, bar, ask_walls, bid_walls, cvd)
             spoof_cleared = decision["signal"] in {"BUY", "SELL"}
     plan = None
+    pu_plan = None
     if decision["signal"] in {"BUY", "SELL"} and decision["wall"]:
         plan = build_plan(decision["signal"], vwap, decision["wall"])
+        pu_plan = to_puprime_plan(plan) if plan else None
     return {
         "ok": bool(goods and bars),
         "live": round_px(live or vwap),
@@ -566,6 +625,7 @@ def snapshot(skip_spoof: bool = False) -> dict[str, Any]:
         "signal": decision["signal"],
         "why": decision["why"],
         "plan": plan,
+        "pu_plan": pu_plan,
         "flow": flow,
         "bid_walls": bid_walls[:6],
         "ask_walls": ask_walls[:6],
@@ -581,7 +641,7 @@ def snapshot(skip_spoof: bool = False) -> dict[str, Any]:
 def render(snap: dict[str, Any]) -> str:
     lines = [
         f"Whale Signal Desk  M1  {snap['when']}",
-        f"live ${snap['live']:,.2f}  VWAP ${snap['vwap']:,.2f}  CVD {snap['cvd']:.2f}",
+        f"live ${snap['live']:,.2f}  PU Prime ${snap['live'] - PU_PRIME_GAP_USD:,.2f}  VWAP ${snap['vwap']:,.2f}  CVD {snap['cvd']:.2f}",
         f"inflow {snap['flow']['inflows']:.2f} BTC  outflow {snap['flow']['outflows']:.2f} BTC",
         f"signal {snap['signal']}  {snap['why']}",
         f"venues {snap['source']}",
@@ -589,7 +649,12 @@ def render(snap: dict[str, Any]) -> str:
     if snap["plan"]:
         p = snap["plan"]
         lines.append(
-            f"{p['side']} ENTRY ${p['entry']:,.2f}  SL ${p['stop']:,.2f}  TP ${p['takeProfit']:,.2f}  size {p['sizeBtc']:.6f} BTC"
+            f"Exchange Levels (Binance/Coinbase Data)  {p['side']} ENTRY ${p['entry']:,.2f}  SL ${p['stop']:,.2f}  TP ${p['takeProfit']:,.2f}  {p['sizeBtc']:.6f} BTC"
+        )
+    if snap.get("pu_plan"):
+        p = snap["pu_plan"]
+        lines.append(
+            f"PuPrime Levels (MT4/MT5 Guide)  {p['side']} ENTRY ${p['entry']:,.2f}  SL ${p['stop']:,.2f}  TP ${p['takeProfit']:,.2f}  Use {p['sizeLots']:.2f} Lots"
         )
     for wall in snap["ask_walls"][:3]:
         tag = "WHALE" if wall["whale"] else "size"

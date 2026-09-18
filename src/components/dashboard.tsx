@@ -10,6 +10,7 @@ import { useLanguage } from "@/components/language-provider";
 import { interpolate, type Dictionary } from "@/lib/i18n";
 import { formatBtc, formatTimestamp, formatUsd } from "@/lib/format";
 import type { M1Snapshot, RiskPlan, WhaleWall } from "@/lib/m1";
+import { lotsGuide, puPrimeQuote } from "@/lib/m1";
 import { matrixApiUrl, priceApiUrl } from "@/lib/urls";
 import type { LivePrice } from "@/lib/types";
 import { Radio, RefreshCw, Volume2 } from "lucide-react";
@@ -189,6 +190,15 @@ export function Dashboard() {
                     )
                   )}
                 </p>
+                <p className="mt-2 text-xs uppercase tracking-wider text-muted-foreground">
+                  {t.puPrimeLive}
+                </p>
+                <p className="font-mono text-lg font-semibold">
+                  {formatUsd(puPrimeQuote(headerPrice))}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {t.puPrimeGapHint}
+                </p>
               </>
             ) : (
               <Skeleton className="mt-2 h-9 w-40" />
@@ -355,6 +365,7 @@ export function Dashboard() {
                 <p>{t.inflowExplain}</p>
                 <p>{t.outflowExplain}</p>
                 <p>{t.spoofExplain}</p>
+                <p>{t.puPrimeExplain}</p>
                 <p>{t.profitNote}</p>
               </CardContent>
             </Card>
@@ -367,12 +378,14 @@ export function Dashboard() {
 
 function ArmedTicket({ data, t }: { data: M1Snapshot; t: Dictionary }) {
   const plan = data.armedPlan;
+  const pu = data.puPrimePlan;
   if (!plan || (data.signal !== "BUY" && data.signal !== "SELL")) {
     return (
       <Card className="border-amber-500/40 bg-amber-500/10 shadow-none">
         <CardContent className="space-y-2 pt-1">
           <p className="text-sm font-semibold">{t.waiting}</p>
           <p className="text-sm text-muted-foreground">{data.recommendation}</p>
+          <p className="text-xs text-muted-foreground">{t.puPrimeWait}</p>
         </CardContent>
       </Card>
     );
@@ -391,24 +404,63 @@ function ArmedTicket({ data, t }: { data: M1Snapshot; t: Dictionary }) {
           : "border-emerald-500/40 bg-emerald-500/10"
       }`}
     >
-      <CardContent className="space-y-3 pt-1">
+      <CardContent className="space-y-4 pt-1">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wider">
             {t.armed} · {plan.side}
           </p>
           <p className="text-sm font-semibold">
             {interpolate(sell ? t.sellNow : t.buyNow, {
-              entry: formatUsd(plan.entry),
+              entry: formatUsd(pu?.entry ?? plan.entry),
             })}
           </p>
         </div>
-        <PlanGrid plan={plan} t={t} />
+        <div className="grid gap-3 lg:grid-cols-2">
+          <LevelBook
+            title={t.exchangeLevels}
+            hint={t.liveTick}
+            plan={plan}
+            t={t}
+            lots={false}
+          />
+          {pu ? (
+            <LevelBook
+              title={t.puPrimeLevels}
+              hint={t.puPrimeGapHint}
+              plan={pu}
+              t={t}
+              lots
+            />
+          ) : null}
+        </div>
         <p className="text-sm">
           {interpolate(sell ? t.sellPlan : t.buyPlan, vars)}
         </p>
         <p className="text-[11px] text-muted-foreground">{t.profitNote}</p>
       </CardContent>
     </Card>
+  );
+}
+
+function LevelBook({
+  title,
+  hint,
+  plan,
+  t,
+  lots,
+}: {
+  title: string;
+  hint: string;
+  plan: RiskPlan;
+  t: Dictionary;
+  lots: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-background/40 px-3 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wider">{title}</p>
+      <p className="mb-3 text-[11px] text-muted-foreground">{hint}</p>
+      <PlanGrid plan={plan} t={t} lots={lots} />
+    </div>
   );
 }
 
@@ -492,9 +544,17 @@ function FlowTape({ data, t }: { data: M1Snapshot; t: Dictionary }) {
   );
 }
 
-function PlanGrid({ plan, t }: { plan: RiskPlan; t: Dictionary }) {
+function PlanGrid({
+  plan,
+  t,
+  lots = false,
+}: {
+  plan: RiskPlan;
+  t: Dictionary;
+  lots?: boolean;
+}) {
   return (
-    <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <dl className="grid gap-3 sm:grid-cols-2">
       <div>
         <dt className="text-xs uppercase tracking-wider text-muted-foreground">
           {t.entryVwap}
@@ -521,10 +581,10 @@ function PlanGrid({ plan, t }: { plan: RiskPlan; t: Dictionary }) {
       </div>
       <div>
         <dt className="text-xs uppercase tracking-wider text-muted-foreground">
-          {t.sizeBtc}
+          {lots ? t.sizeLots : t.sizeBtc}
         </dt>
         <dd className="font-mono text-xl font-semibold">
-          {formatBtc(plan.sizeBtc)}
+          {lots ? lotsGuide(plan.sizeLots) : formatBtc(plan.sizeBtc)}
         </dd>
         <dd className="text-[11px] text-muted-foreground">
           {t.riskUsd} {formatUsd(plan.riskUsd)} · {t.notional}{" "}

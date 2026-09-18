@@ -15,9 +15,8 @@ The dashboard draws those walls as price-level boxes on the M1 chart (solid = wh
 
 Risk math (auto-updates from live Global VWAP at the confluence second):
 
-- **ENTRY** = Global VWAP
-- **STOP** = other side of the whale wall, sized so risk is **$10** on a **$1,000** wallet (1%)
-- **TAKE PROFIT** = **1:3** (three times the stop distance) — the 90% target-accuracy setup, not 90% of BTC’s price
+- **Exchange Levels (Binance/Coinbase Data)** — bot monitoring. ENTRY = Global VWAP. STOP = other side of the whale wall. TAKE PROFIT = 1:3. Size in BTC. **$10** max risk on a **$1,000** wallet.
+- **PuPrime Levels (MT4/MT5 Guide)** — subtract **$130** so PU Prime matches the exchange screen, pad the stop by the **$17** spread, keep **$10** max risk, and print volume as **lots** (e.g. `Use 0.04 Lots`).
 
 ```bash
 npm install

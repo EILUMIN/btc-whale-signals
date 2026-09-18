@@ -14,6 +14,13 @@ export const RISK_USD = 10;
 export const RR_MULT = 3;
 export const BOOK_LIMIT = 500;
 export const FLOW_WINDOW_SEC = 60 * 60;
+/** PU Prime BTCUSD typically prints ~$130 below Binance/Coinbase. */
+export const PU_PRIME_GAP_USD = 130;
+/** Typical PU Prime BTCUSD spread to pad the MT4/MT5 stop. */
+export const PU_PRIME_SPREAD_USD = 17;
+/** 1.00 lot = 1 BTC on PU Prime BTCUSD. */
+export const BTC_PER_LOT = 1;
+export const LOT_STEP = 0.01;
 
 export type WallSide = "bid" | "ask";
 
@@ -60,8 +67,12 @@ export type RiskPlan = {
   riskUsd: number;
   walletUsd: number;
   sizeBtc: number;
+  sizeLots: number;
   notionalUsd: number;
   rr: number;
+  book: "exchange" | "puprime";
+  gapUsd: number;
+  spreadUsd: number;
 };
 
 export type M1Signal = "BUY" | "SELL" | "WAIT";
@@ -80,6 +91,7 @@ export type M1Snapshot = {
   spoofChecked: boolean;
   spoofCleared: boolean;
   armedPlan: RiskPlan | null;
+  puPrimePlan: RiskPlan | null;
   walls: WhaleWall[];
   askWalls: WhaleWall[];
   bidWalls: WhaleWall[];
@@ -250,8 +262,65 @@ export function buildWallPlan(
     riskUsd: RISK_USD,
     walletUsd: WALLET_USD,
     sizeBtc,
+    sizeLots: btcToLots(sizeBtc),
     notionalUsd: roundPrice(sizeBtc * entry),
     rr: RR_MULT,
+    book: "exchange",
+    gapUsd: 0,
+    spreadUsd: 0,
+  };
+}
+
+export function btcToLots(sizeBtc: number): number {
+  if (!(sizeBtc > 0)) return 0;
+  const lots = Math.round(sizeBtc / BTC_PER_LOT / LOT_STEP) * LOT_STEP;
+  return Math.round(Math.max(lots, LOT_STEP) * 100) / 100;
+}
+
+export function lotsGuide(lots: number): string {
+  return `Use ${lots.toFixed(2)} Lots`;
+}
+
+export function puPrimeQuote(exchangeUsd: number): number {
+  return roundPrice(exchangeUsd - PU_PRIME_GAP_USD);
+}
+
+/**
+ * MT4/MT5 guide: shift every level −$130 so PU Prime matches the exchange
+ * screen, then pad the stop by the $17 spread and re-size to $10 max risk.
+ */
+export function toPuPrimePlan(plan: RiskPlan): RiskPlan | null {
+  const entry = roundPrice(plan.entry - PU_PRIME_GAP_USD);
+  const stop =
+    plan.side === "BUY"
+      ? roundPrice(plan.stop - PU_PRIME_GAP_USD - PU_PRIME_SPREAD_USD)
+      : roundPrice(plan.stop - PU_PRIME_GAP_USD + PU_PRIME_SPREAD_USD);
+  const riskPerBtc = roundPrice(Math.abs(entry - stop));
+  if (riskPerBtc < 1) return null;
+  if (plan.side === "SELL" && stop <= entry) return null;
+  if (plan.side === "BUY" && stop >= entry) return null;
+  const sizeBtc = Math.round((RISK_USD / riskPerBtc) * 1_000_000) / 1_000_000;
+  const sizeLots = btcToLots(sizeBtc);
+  const takeProfit =
+    plan.side === "SELL"
+      ? roundPrice(entry - RR_MULT * riskPerBtc)
+      : roundPrice(entry + RR_MULT * riskPerBtc);
+  return {
+    side: plan.side,
+    entry,
+    stop,
+    takeProfit,
+    wallPrice: roundPrice(plan.wallPrice - PU_PRIME_GAP_USD),
+    riskPerBtc,
+    riskUsd: RISK_USD,
+    walletUsd: WALLET_USD,
+    sizeBtc,
+    sizeLots,
+    notionalUsd: roundPrice(sizeLots * BTC_PER_LOT * entry),
+    rr: RR_MULT,
+    book: "puprime",
+    gapUsd: PU_PRIME_GAP_USD,
+    spreadUsd: PU_PRIME_SPREAD_USD,
   };
 }
 

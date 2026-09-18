@@ -34,6 +34,20 @@ export function formatM1Email(
   snap: M1Snapshot
 ): { subject: string; text: string } {
   const side = plan.side;
+  const pu = snap.puPrimePlan;
+  const money = (n: number) =>
+    `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const puLines = pu
+    ? [
+        "PuPrime Levels (MT4/MT5 Guide)",
+        `Entry: ${money(pu.entry)}  (−$${pu.gapUsd} gap vs exchange)`,
+        `Stop (other side of wall + $${pu.spreadUsd} spread): ${money(pu.stop)}`,
+        `Take Profit (1:3 R:R): ${money(pu.takeProfit)}`,
+        `Volume: Use ${pu.sizeLots.toFixed(2)} Lots`,
+        `Risk: $${pu.riskUsd.toFixed(2)}`,
+        "",
+      ]
+    : [];
   const text = [
     M1_ALERT_SUBJECT,
     "",
@@ -41,18 +55,21 @@ export function formatM1Email(
     "On-chain flow + order-book wall + CVD agreed. 5-second anti-spoof passed.",
     "",
     `Side: ${side}`,
-    `Entry (Global VWAP at trigger): $${plan.entry.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    `Stop (other side of whale wall): $${plan.stop.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    `Take Profit (1:3 R:R): $${plan.takeProfit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    `Safe size (1% of $1,000): ${plan.sizeBtc.toFixed(6)} BTC`,
-    `Notional: $${plan.notionalUsd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    `Risk: $${plan.riskUsd.toFixed(2)}`,
-    `Whale wall: $${plan.wallPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     "",
+    "Exchange Levels (Binance/Coinbase Data)",
+    `Entry (Global VWAP at trigger): ${money(plan.entry)}`,
+    `Stop (other side of whale wall): ${money(plan.stop)}`,
+    `Take Profit (1:3 R:R): ${money(plan.takeProfit)}`,
+    `Safe size (1% of $1,000): ${plan.sizeBtc.toFixed(6)} BTC`,
+    `Notional: ${money(plan.notionalUsd)}`,
+    `Risk: $${plan.riskUsd.toFixed(2)}`,
+    `Whale wall: ${money(plan.wallPrice)}`,
+    "",
+    ...puLines,
     `On-chain inflow: ${snap.flow.inflows.toFixed(2)} BTC`,
     `On-chain outflow: ${snap.flow.outflows.toFixed(2)} BTC`,
     `CVD (M1): ${snap.cvd.toFixed(2)} (${snap.cvdLabel})`,
-    `Live price: $${snap.live_price.toFixed(2)}`,
+    `Live price: ${money(snap.live_price)}`,
     `M1 candle: ${snap.candleKey}`,
     `venues: ${snap.source}`,
     `when: ${snap.scannedAt}`,
