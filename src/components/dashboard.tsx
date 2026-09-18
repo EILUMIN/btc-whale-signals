@@ -11,8 +11,31 @@ import { formatBtc, formatTimestamp, formatUsd } from "@/lib/format";
 import type { MatrixSnapshot, RiskPlan } from "@/lib/matrix";
 import { matrixApiUrl, priceApiUrl } from "@/lib/urls";
 import type { LivePrice } from "@/lib/types";
-import { Radio, RefreshCw, ShieldAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Radio, RefreshCw, ShieldAlert, Volume2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+function playSellPing() {
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!AudioCtx) return;
+  const ctx = new AudioCtx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(880, ctx.currentTime);
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + 0.03);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.38);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.4);
+  osc.onended = () => {
+    void ctx.close();
+  };
+}
 
 export function Dashboard() {
   const { t } = useLanguage();
@@ -21,6 +44,8 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
+  const [soundReady, setSoundReady] = useState(false);
+  const prevSignal = useRef<string>("WAIT");
 
   const loadMatrix = useCallback(async () => {
     const response = await fetch(matrixApiUrl(), { cache: "no-store" });
@@ -40,6 +65,16 @@ export function Dashboard() {
         setData(json);
         setError(json.error);
         setUpdatedAt(new Date().toISOString());
+        const fromHold =
+          prevSignal.current === "HOLD" || Boolean(json.alertPing);
+        if (fromHold && json.signal === "SELL") {
+          try {
+            playSellPing();
+          } catch {
+            // autoplay may need a click; Enable sound covers that
+          }
+        }
+        prevSignal.current = json.signal;
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -54,6 +89,29 @@ export function Dashboard() {
       clearInterval(timer);
     };
   }, [loadMatrix]);
+
+  useEffect(() => {
+    const unlock = () => {
+      setSoundReady(true);
+      try {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          void ctx.resume().finally(() => {
+            void ctx.close();
+          });
+        }
+      } catch {
+        // ignore
+      }
+      window.removeEventListener("pointerdown", unlock);
+    };
+    window.addEventListener("pointerdown", unlock);
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +263,23 @@ export function Dashboard() {
           <Radio className="size-3" />
           {data?.source || t.connectingLiveFeed}
         </Badge>
+        <Badge variant="outline" className="gap-1">
+          <Volume2 className="size-3" />
+          {soundReady ? t.soundReady : t.emailIdle}
+        </Badge>
+        {data?.emailStatus === "sent" && (
+          <span className="text-emerald-300">
+            {interpolate(t.emailSent, { to: "elmer.whaledesk@gmail.com" })}
+          </span>
+        )}
+        {data?.emailStatus === "skipped" && (
+          <span className="text-amber-300">{t.emailSkipped}</span>
+        )}
+        {data?.emailStatus === "failed" && (
+          <span className="text-red-300">
+            {interpolate(t.emailFailed, { detail: data.emailDetail ?? "" })}
+          </span>
+        )}
         <span>
           {t.lastScan}:{" "}
           {data?.scannedAt

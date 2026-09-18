@@ -38,6 +38,23 @@ Parehong lock (RSI>75 + ATR>$150) at 1:3 VWAP math. Terminal dashboard every 10s
 
 Hindi ito financial advice.
 
+## Email + sound alerts
+
+Kapag lumiko ang loop mula **HOLDING** → **SELL / SHORT SETUP** (RSI drop below 70 pagkatapos ng breakout):
+
+1. May **browser ping** sa dashboard.
+2. **Isang email lang** ang papunta sa `elmer.whaledesk@gmail.com` (hindi magre-repeat hangga't hindi bumalik sa HOLDING).
+
+Gmail SMTP `smtp.gmail.com:587` + TLS. Ilagay sa `.env`:
+
+```
+EMAIL_SENDER=elmer.whaledesk@gmail.com
+EMAIL_APP_PASSWORD=your-gmail-app-password
+EMAIL_RECEIVER=elmer.whaledesk@gmail.com
+```
+
+Gumawa ng [Gmail App Password](https://myaccount.google.com/apppasswords) (2FA on). Huwag ordinaryong password. Kung walang `EMAIL_APP_PASSWORD`, tumutunog pa rin ang desk; skip lang ang SMTP.
+
 ### Sa smartphone
 
 I-deploy sa Vercel (Publish) para sa `https://…vercel.app`. Walang kailangang API key.

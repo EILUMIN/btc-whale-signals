@@ -70,6 +70,9 @@ export type MatrixSnapshot = {
   bars: number;
   scannedAt: string;
   source: string;
+  alertPing?: boolean;
+  emailStatus?: "sent" | "skipped" | "failed" | "idle";
+  emailDetail?: string;
 };
 
 export function wilderRsi(closes: number[], length = RSI_LEN): number[] {

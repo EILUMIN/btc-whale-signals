@@ -19,8 +19,18 @@ import argparse
 import json
 import os
 import re
+import smtplib
+import ssl
 import sys
 import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.message import EmailMessage
+from html.parser import HTMLParser
+from typing import Any
+from urllib.request import Request, urlopen
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -68,6 +78,9 @@ OHLCV_LIMIT = 120
 USER_AGENT = (
     "Mozilla/5.0 (compatible; MasterBot/1.0; +https://github.com/EILUMIN/btc-whale-signals)"
 )
+GMAIL_SMTP_HOST = "smtp.gmail.com"
+GMAIL_SMTP_PORT = 587
+DEFAULT_EMAIL_RECEIVER = "elmer.whaledesk@gmail.com"
 
 MEMPOOL_API = os.environ.get("MEMPOOL_API_BASE", "https://mempool.space/api").rstrip("/")
 FARSIDE_URL = "https://farside.co.uk/BTC/"
@@ -75,6 +88,78 @@ SOSO_URL = (
     "https://api.sosovalue.xyz/openapi/v2/etf/historicalInflowChart"
     "?type=us-btc-spot"
 )
+
+
+def load_dotenv(path: str | None = None) -> None:
+    """Bind EMAIL_* from .env without leaking the app password into logs."""
+    root = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.isfile(root):
+        return
+    with open(root, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+load_dotenv()
+
+
+def send_email_alert(
+    *,
+    entry: float,
+    take_profit: float,
+    stop: float,
+    size_btc: float,
+    rsi: float,
+    atr: float,
+    vwap: float,
+    when: str,
+) -> str:
+    """One Gmail SMTP (587 + TLS) message. Returns sent | skipped | failed:..."""
+    sender = os.environ.get("EMAIL_SENDER", "").strip()
+    password = os.environ.get("EMAIL_APP_PASSWORD", "").strip()
+    receiver = (
+        os.environ.get("EMAIL_RECEIVER", "").strip() or DEFAULT_EMAIL_RECEIVER
+    )
+    if not sender or not password:
+        return "skipped"
+    body = (
+        "SELL / SHORT SETUP\n\n"
+        "The generator left HOLDING (breakout lock) after RSI dropped back below 70.\n"
+        "Numbers are live Global VWAP — not a stale whale wall.\n\n"
+        f"Entry (Global VWAP): ${entry:,.2f}\n"
+        f"Take Profit (1:3 Reward): ${take_profit:,.2f}\n"
+        f"Stop Loss (1.5× ATR): ${stop:,.2f}\n"
+        f"Safe size (1% of $1,000): {size_btc:.4f} BTC\n"
+        f"live_rsi: {rsi:.2f}\n"
+        f"live_atr: ${atr:,.2f}\n"
+        f"Global VWAP: ${vwap:,.2f}\n"
+        f"when: {when}\n\n"
+        "Not financial advice.\n"
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Whale Signal Desk — SELL / SHORT SETUP"
+    msg["From"] = f"Whale Signal Desk <{sender}>"
+    msg["To"] = receiver
+    msg.set_content(body)
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP(GMAIL_SMTP_HOST, GMAIL_SMTP_PORT, timeout=20) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=context)
+            smtp.ehlo()
+            smtp.login(sender, password)
+            smtp.send_message(msg)
+        return "sent"
+    except Exception as exc:  # noqa: BLE001
+        return f"failed: {exc}"[:180]
+
 
 # Publicly labeled exchange clusters (BitInfoCharts / community labels).
 EXCHANGE_WALLETS: dict[str, str] = {
@@ -1049,16 +1134,27 @@ def render(
 # ===========================================================================
 
 def run(once: bool, interval: float, wallet: float) -> None:
+    load_dotenv()
     liq_eng = LiquidityAggregator()
     chain = OnchainTracker()
     etf_eng = EtfMonitor()
     tech_eng = MomentumGuard()
     paper = PaperState()
     cycle = 0
+    prev_state = "WAIT"
+    emailed_this_arm = False
     print(
         f"{CYN}Booting public feeds (Binance / Coinbase / Kraken / Mempool / Farside)…{RESET}",
         flush=True,
     )
+    receiver = os.environ.get("EMAIL_RECEIVER") or DEFAULT_EMAIL_RECEIVER
+    if os.environ.get("EMAIL_APP_PASSWORD"):
+        print(f"{DIM}Email alerts armed → {receiver} via Gmail SMTP 587 TLS{RESET}", flush=True)
+    else:
+        print(
+            f"{YEL}EMAIL_APP_PASSWORD empty — HOLDING→SELL will ping the desk but skip SMTP.{RESET}",
+            flush=True,
+        )
     while True:
         cycle += 1
         try:
@@ -1080,6 +1176,23 @@ def run(once: bool, interval: float, wallet: float) -> None:
 
         live = liq.live or tech.vwap
         plan = build_plan(liq, whales, tech, wallet, live, paper)
+        current = "HOLD" if tech.breakout_lock else ("SELL" if plan.side == "SELL" else "WAIT")
+        if prev_state == "HOLD" and current == "SELL" and not emailed_this_arm:
+            status = send_email_alert(
+                entry=plan.entry,
+                take_profit=plan.take_profit,
+                stop=plan.stop,
+                size_btc=plan.size_btc,
+                rsi=tech.rsi,
+                atr=tech.atr,
+                vwap=tech.vwap or live,
+                when=iso_now(),
+            )
+            print(f"{CYN}HOLDING → SELL / SHORT SETUP email: {status}{RESET}", flush=True)
+            emailed_this_arm = True
+        if current == "HOLD":
+            emailed_this_arm = False
+        prev_state = current
         frame = render(liq, whales, etf, tech, plan, paper, wallet, cycle)
         if sys.stdout.isatty() and not once:
             sys.stdout.write("\033[2J\033[H")

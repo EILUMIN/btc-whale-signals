@@ -146,8 +146,9 @@ const g = globalThis as unknown as { __matrixCache?: Cache };
 
 export async function getMatrixSnapshot(): Promise<MatrixSnapshot> {
   const now = Date.now();
+  const { applySellAlertLatch } = await import("@/lib/signal-alert");
   if (g.__matrixCache && now - g.__matrixCache.at < 6_000) {
-    return g.__matrixCache.snap;
+    return applySellAlertLatch(g.__matrixCache.snap);
   }
 
   const [venues, ohlcvSets] = await Promise.all([
@@ -248,5 +249,5 @@ export async function getMatrixSnapshot(): Promise<MatrixSnapshot> {
   };
 
   g.__matrixCache = { at: now, snap };
-  return snap;
+  return applySellAlertLatch(snap);
 }

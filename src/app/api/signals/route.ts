@@ -39,6 +39,9 @@ export async function GET() {
         bars: 0,
         scannedAt: new Date().toISOString(),
         source: "error",
+        alertPing: false,
+        emailStatus: "idle",
+        emailDetail: "",
       },
       { status: 500, headers: { "Cache-Control": "no-store" } }
     );

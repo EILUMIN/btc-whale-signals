@@ -6,6 +6,12 @@ import {
   wilderAtr,
   wilderRsi,
 } from "../src/lib/matrix";
+import {
+  formatSellEmail,
+  resetAlertLatch,
+  shouldFireSellAlert,
+} from "../src/lib/signal-alert";
+import type { MatrixSnapshot } from "../src/lib/matrix";
 import { mempoolUrl } from "../src/lib/urls";
 
 const rsis = wilderRsi(
@@ -56,6 +62,35 @@ const lows = highs.map((h) => h - 2);
 const closes = highs.map((h) => h - 1);
 const atrs = wilderAtr(highs, lows, closes);
 if (atrs.length === 0) throw new Error("atr");
+
+if (!shouldFireSellAlert("HOLD", "SELL", false)) {
+  throw new Error("HOLDING → SELL must fire");
+}
+if (shouldFireSellAlert("HOLD", "SELL", true)) {
+  throw new Error("second SELL on same arm must not email");
+}
+if (shouldFireSellAlert("WAIT", "SELL", false)) {
+  throw new Error("cold-start SELL without HOLDING must not email");
+}
+if (shouldFireSellAlert("HOLD", "WAIT", false)) {
+  throw new Error("HOLDING without SELL must not email");
+}
+
+resetAlertLatch("HOLD");
+const mail = formatSellEmail(plan, {
+  live_rsi: 68.2,
+  rsi_prev: 72,
+  live_atr: 200,
+  live_price: 80_000,
+  live_vwap: 80_000,
+  source: "binanceus + coinbase + kraken",
+  scannedAt: "2026-09-18T00:00:00.000Z",
+} as MatrixSnapshot);
+if (!mail.subject.includes("SELL / SHORT SETUP")) throw new Error("subject");
+if (!mail.text.includes("Entry (Global VWAP)")) throw new Error("entry line");
+if (!mail.text.includes("Take Profit (1:3 Reward)")) throw new Error("tp line");
+if (!mail.text.includes("Stop Loss (1.5× ATR)")) throw new Error("sl line");
+if (!mail.text.includes("0.0333 BTC")) throw new Error(`size in email: ${mail.text}`);
 
 const recent = mempoolUrl("/mempool/recent");
 if (!recent.startsWith("https://mempool.space/api/mempool/recent")) {
