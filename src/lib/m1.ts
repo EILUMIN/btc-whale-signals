@@ -134,6 +134,7 @@ export type M1Snapshot = {
   flow: OnchainFlow;
   venues: Array<{ name: string; symbol: string; last: number; ok: boolean }>;
   scannedAt: string;
+  scanStatus?: "ok" | "scanning" | "failed";
   source: string;
   alertPing?: boolean;
   emailStatus?: "sent" | "skipped" | "failed" | "idle";

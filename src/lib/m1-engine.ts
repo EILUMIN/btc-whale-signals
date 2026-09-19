@@ -277,23 +277,73 @@ function cvdLabel(cvd: number): string {
 }
 
 type Cache = { at: number; snap: M1Snapshot };
-const g = globalThis as unknown as { __m1Cache?: Cache };
+type FlowCache = { at: number; flow: ReturnType<typeof emptyOnchainFlow> };
+const g = globalThis as unknown as {
+  __m1Cache?: Cache;
+  __m1FlowCache?: FlowCache;
+  __m1FlowJob?: Promise<ReturnType<typeof emptyOnchainFlow>>;
+};
+
+const SNAP_CACHE_MS = 8_000;
+const FLOW_CACHE_MS = 45_000;
+const FLOW_WAIT_MS = 9_000;
+
+function withTimeout<T>(job: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    job.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      }
+    );
+  });
+}
+
+async function cachedOnchainFlow() {
+  const now = Date.now();
+  if (g.__m1FlowCache && now - g.__m1FlowCache.at < FLOW_CACHE_MS) {
+    return { flow: g.__m1FlowCache.flow, fresh: true };
+  }
+  if (!g.__m1FlowJob) {
+    g.__m1FlowJob = scanOnchainFlow()
+      .then((flow) => {
+        g.__m1FlowCache = { at: Date.now(), flow };
+        return flow;
+      })
+      .finally(() => {
+        g.__m1FlowJob = undefined;
+      });
+  }
+  const waited = await withTimeout(g.__m1FlowJob, FLOW_WAIT_MS);
+  if (waited) return { flow: waited, fresh: true };
+  if (g.__m1FlowCache) {
+    const age = Date.now() - g.__m1FlowCache.at;
+    return { flow: g.__m1FlowCache.flow, fresh: age < FLOW_CACHE_MS };
+  }
+  return { flow: emptyOnchainFlow(), fresh: false };
+}
 
 export async function getM1Snapshot(options?: {
   skipSpoofDelay?: boolean;
 }): Promise<M1Snapshot> {
   const now = Date.now();
   const { applyM1AlertLatch } = await import("@/lib/signal-alert");
-  if (g.__m1Cache && now - g.__m1Cache.at < 8_000) {
+  if (g.__m1Cache && now - g.__m1Cache.at < SNAP_CACHE_MS) {
     return applyM1AlertLatch(g.__m1Cache.snap);
   }
 
-  const [venues, ohlcvSets, delta, flow] = await Promise.all([
+  const [venues, ohlcvSets, delta, flowPack] = await Promise.all([
     Promise.all(ROUTES.map(pullWithFallback)),
     Promise.all(ROUTES.map(pullOhlcv)),
     fetchBinanceDeltaBars(),
-    scanOnchainFlow(),
+    cachedOnchainFlow(),
   ]);
+  const flow = flowPack.flow;
 
   const goods = venues.filter((v) => v.ok && v.last > 0);
   const livePrice =
@@ -396,6 +446,7 @@ export async function getM1Snapshot(options?: {
       ok: v.ok,
     })),
     scannedAt: new Date().toISOString(),
+    scanStatus: goods.length > 0 ? (flowPack.fresh ? "ok" : "scanning") : "failed",
     source: goods.map((v) => v.name).join(" + ") || "none",
   };
 
@@ -426,6 +477,7 @@ export function emptyM1Snapshot(error: string): M1Snapshot {
     flow: emptyOnchainFlow(),
     venues: [],
     scannedAt: new Date().toISOString(),
+    scanStatus: "failed",
     source: "error",
     alertPing: false,
     emailStatus: "idle",

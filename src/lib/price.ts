@@ -1,5 +1,5 @@
 import { fetchJson, withRetry } from "@/lib/http";
-import type { LivePrice } from "@/lib/types";
+import type { LivePrice, VenueTick } from "@/lib/types";
 
 type BinancePrice = { symbol: string; price: string };
 type BinanceTicker = {
@@ -47,46 +47,58 @@ async function tryHosts<T>(path: string): Promise<{ data: T; source: string }> {
 }
 
 export async function fetchLivePrice(): Promise<LivePrice> {
+  const venues = await fetchPublicVenueTicks();
+  const goods = venues.filter((row) => row.ok && row.last > 0);
+  const usd =
+    goods.length > 0
+      ? goods.reduce((sum, row) => sum + row.last, 0) / goods.length
+      : 0;
+  const timestamp =
+    goods
+      .map((row) => row.timestamp)
+      .sort()
+      .at(-1) ?? new Date().toISOString();
+  const venueSource = goods.map((row) => row.name).join(" + ") || "none";
+
   try {
     const { data, source } = await tryHosts<BinanceTicker>(
       "/api/v3/ticker/24hr?symbol=BTCUSDT"
     );
     return {
-      usd: Number(data.lastPrice),
+      usd: usd || Number(data.lastPrice),
       change24hPct: Number(data.priceChangePercent),
       high24h: Number(data.highPrice),
       low24h: Number(data.lowPrice),
-      source,
-      timestamp: new Date().toISOString(),
+      source: usd ? venueSource : source,
+      timestamp,
+      venues,
     };
   } catch {
-    try {
-      const { data, source } = await tryHosts<BinancePrice>(
-        "/api/v3/ticker/price?symbol=BTCUSDT"
-      );
+    if (usd > 0) {
       return {
-        usd: Number(data.price),
+        usd,
         change24hPct: null,
         high24h: null,
         low24h: null,
-        source,
-        timestamp: new Date().toISOString(),
-      };
-    } catch {
-      const mempool = await withRetry(() =>
-        fetchJson<{ USD: number; time: number }>(
-          "https://mempool.space/api/v1/prices"
-        )
-      );
-      return {
-        usd: Number(mempool.USD),
-        change24hPct: null,
-        high24h: null,
-        low24h: null,
-        source: "Mempool.space",
-        timestamp: new Date(mempool.time * 1000).toISOString(),
+        source: venueSource,
+        timestamp,
+        venues,
       };
     }
+    const mempool = await withRetry(() =>
+      fetchJson<{ USD: number; time: number }>(
+        "https://mempool.space/api/v1/prices"
+      )
+    );
+    return {
+      usd: Number(mempool.USD),
+      change24hPct: null,
+      high24h: null,
+      low24h: null,
+      source: "Mempool.space",
+      timestamp: new Date(mempool.time * 1000).toISOString(),
+      venues,
+    };
   }
 }
 
@@ -148,4 +160,84 @@ export async function fetchRecentHourlies(limit = 48): Promise<HourlyCandle[]> {
 
 export function roundPrice(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+export function parseBinancePrice(data: { price?: string; lastPrice?: string }) {
+  const value = Number(data.lastPrice ?? data.price);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+export function parseCoinbaseTicker(data: {
+  price?: string;
+  data?: { amount?: string };
+}) {
+  const value = Number(data.price ?? data.data?.amount);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+export function parseKrakenTicker(data: {
+  result?: Record<string, { c?: string[] }>;
+}) {
+  const row = Object.values(data.result ?? {})[0];
+  const value = Number(row?.c?.[0]);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+async function tickOrOffline(
+  name: string,
+  symbol: string,
+  fn: () => Promise<{ last: number; timestamp: string }>
+): Promise<VenueTick> {
+  try {
+    const row = await fn();
+    return { name, symbol, last: roundPrice(row.last), ok: row.last > 0, timestamp: row.timestamp };
+  } catch {
+    return {
+      name,
+      symbol,
+      last: 0,
+      ok: false,
+      timestamp: new Date().toISOString(),
+    };
+  }
+}
+
+/** Public REST last prints — no API keys. Binance.com falls back to Binance.US. */
+export async function fetchPublicVenueTicks(): Promise<VenueTick[]> {
+  const now = () => new Date().toISOString();
+  const [binance, coinbase, kraken] = await Promise.all([
+    tickOrOffline("binance", "BTC/USD", async () => {
+      try {
+        const data = await fetchJson<{ price: string }>(
+          "https://api.binance.us/api/v3/ticker/price?symbol=BTCUSD"
+        );
+        return { last: parseBinancePrice(data), timestamp: now() };
+      } catch {
+        const data = await fetchJson<{ price: string }>(
+          "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+        );
+        return { last: parseBinancePrice(data), timestamp: now() };
+      }
+    }),
+    tickOrOffline("coinbase", "BTC/USD", async () => {
+      try {
+        const data = await fetchJson<{ price?: string }>(
+          "https://api.exchange.coinbase.com/products/BTC-USD/ticker"
+        );
+        return { last: parseCoinbaseTicker(data), timestamp: now() };
+      } catch {
+        const data = await fetchJson<{ data?: { amount?: string } }>(
+          "https://api.coinbase.com/v2/prices/BTC-USD/spot"
+        );
+        return { last: parseCoinbaseTicker(data), timestamp: now() };
+      }
+    }),
+    tickOrOffline("kraken", "BTC/USD", async () => {
+      const data = await fetchJson<{ result?: Record<string, { c?: string[] }> }>(
+        "https://api.kraken.com/0/public/Ticker?pair=XBTUSD"
+      );
+      return { last: parseKrakenTicker(data), timestamp: now() };
+    }),
+  ]);
+  return [binance, coinbase, kraken];
 }

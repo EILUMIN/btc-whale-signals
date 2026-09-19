@@ -8,11 +8,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLanguage } from "@/components/language-provider";
 import { interpolate, type Dictionary } from "@/lib/i18n";
-import { formatBtc, formatTimestamp, formatUsd } from "@/lib/format";
+import {
+  PRICE_STALE_SEC,
+  SCAN_STALE_SEC,
+  ageSeconds,
+  formatBtc,
+  formatIsoUtc,
+  formatUsd,
+  isStale,
+} from "@/lib/format";
 import type { M1Snapshot, RiskPlan, WhaleWall } from "@/lib/m1";
 import { lotsGuide, puPrimeQuote } from "@/lib/m1";
 import { matrixApiUrl, priceApiUrl } from "@/lib/urls";
-import type { LivePrice } from "@/lib/types";
+import type { LivePrice, VenueTick } from "@/lib/types";
 import { ExternalLink, Radio, RefreshCw, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -47,7 +55,12 @@ export function Dashboard() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
   const [soundReady, setSoundReady] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [scanPhase, setScanPhase] = useState<"idle" | "scanning" | "failed">(
+    "scanning"
+  );
   const lastPingCandle = useRef<number | null>(null);
+  const snapshotInFlight = useRef(false);
 
   const loadSnapshot = useCallback(async () => {
     const response = await fetch(matrixApiUrl(), { cache: "no-store" });
@@ -59,14 +72,23 @@ export function Dashboard() {
   }, [t.fetchError]);
 
   useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const tick = async () => {
+      if (snapshotInFlight.current) return;
+      snapshotInFlight.current = true;
+      setScanPhase("scanning");
       try {
         const json = await loadSnapshot();
         if (cancelled) return;
         setData(json);
         setError(json.error);
         setUpdatedAt(new Date().toISOString());
+        setScanPhase(json.ok ? "idle" : "failed");
         const pingThisCandle =
           Boolean(json.alertPing) &&
           (json.signal === "BUY" || json.signal === "SELL") &&
@@ -82,7 +104,9 @@ export function Dashboard() {
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
+        setScanPhase("failed");
       } finally {
+        snapshotInFlight.current = false;
         if (!cancelled) setLoading(false);
       }
     };
@@ -153,7 +177,35 @@ export function Dashboard() {
   }, [loadSnapshot]);
 
   const headerPrice = livePrice?.usd ?? data?.live_price ?? data?.live_vwap ?? 0;
+  const priceStamp = livePrice?.timestamp ?? data?.scannedAt ?? null;
+  const priceAge = priceStamp ? ageSeconds(priceStamp, nowMs) : null;
+  const priceStale = isStale(priceStamp, PRICE_STALE_SEC, nowMs);
+  const scanStamp = data?.scannedAt ?? null;
+  const scanAge = scanStamp ? ageSeconds(scanStamp, nowMs) : null;
+  const scanStale = isStale(scanStamp, SCAN_STALE_SEC, nowMs);
+  const venues: VenueTick[] =
+    livePrice?.venues?.length
+      ? livePrice.venues
+      : (data?.venues ?? []).map((venue) => ({
+          name: venue.name,
+          symbol: venue.symbol,
+          last: venue.last,
+          ok: venue.ok,
+          timestamp: data?.scannedAt ?? new Date(nowMs).toISOString(),
+        }));
   const signal = data?.signal ?? "WAIT";
+  const scanLabel =
+    scanPhase === "scanning" && !data
+      ? t.scanScanning
+      : scanPhase === "failed" && !data
+        ? t.scanFailed
+        : scanStale
+          ? t.scanStale
+          : data?.scanStatus === "failed"
+            ? t.scanFailed
+            : data?.scanStatus === "scanning"
+              ? t.scanScanning
+              : t.scanOk;
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
@@ -173,7 +225,7 @@ export function Dashboard() {
           </div>
           <div className="rounded-xl border border-amber-500/20 bg-card px-4 py-3">
             <p className="text-xs uppercase tracking-wider text-muted-foreground">
-              {t.livePrice}
+              {priceStale ? t.stalePrice : t.livePrice}
             </p>
             {headerPrice ? (
               <>
@@ -181,14 +233,12 @@ export function Dashboard() {
                   {formatUsd(headerPrice)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {livePrice?.source ?? data?.source} · {t.liveTick}{" "}
-                  {formatTimestamp(
-                    Math.floor(
-                      new Date(
-                        livePrice?.timestamp ?? data?.scannedAt ?? 0
-                      ).getTime() / 1000
-                    )
-                  )}
+                  {livePrice?.source ?? data?.source} ·{" "}
+                  {priceStale ? t.staleTick : t.liveTick}{" "}
+                  {priceStamp ? formatIsoUtc(priceStamp) : "—"}
+                  {priceAge !== null
+                    ? ` · ${interpolate(t.dataAge, { n: priceAge })}`
+                    : ""}
                 </p>
                 <p className="mt-2 text-xs uppercase tracking-wider text-muted-foreground">
                   {t.puPrimeLive}
@@ -255,7 +305,12 @@ export function Dashboard() {
           className="gap-1 border-emerald-500/30 text-emerald-300"
         >
           <Radio className="size-3" />
-          {data?.source || t.connectingLiveFeed}
+          {venues.some((row) => row.ok)
+            ? venues
+                .filter((row) => row.ok)
+                .map((row) => row.name)
+                .join(" + ")
+            : data?.source || t.connectingLiveFeed}
         </Badge>
         <Badge variant="outline">{t.m1Label}</Badge>
         <Badge variant="outline" className="gap-1">
@@ -296,14 +351,20 @@ export function Dashboard() {
           <span className="text-amber-300">{t.spoofFail}</span>
         )}
         <span>
-          {t.lastScan}:{" "}
-          {data?.scannedAt
-            ? new Date(data.scannedAt).toLocaleTimeString()
-            : t.pending}
+          {t.lastScan}: {scanLabel}
+          {scanStamp
+            ? ` · ${formatIsoUtc(scanStamp)}${
+                scanAge !== null
+                  ? ` · ${interpolate(t.dataAge, { n: scanAge })}`
+                  : ""
+              }`
+            : scanPhase === "scanning"
+              ? ` · ${t.scanScanning}`
+              : ` · ${t.scanFailed}`}
         </span>
         {updatedAt && (
           <span>
-            {t.uiRefresh}: {new Date(updatedAt).toLocaleTimeString()}
+            {t.uiRefresh}: {formatIsoUtc(updatedAt)}
           </span>
         )}
         <Button size="sm" variant="ghost" onClick={() => void refresh()}>
@@ -316,6 +377,31 @@ export function Dashboard() {
         <Card className="border-red-500/40 bg-red-500/10 shadow-none">
           <CardContent className="pt-1 text-sm text-red-200">
             {interpolate(t.feedError, { error })}
+          </CardContent>
+        </Card>
+      )}
+
+      {venues.length > 0 && !data && (
+        <Card className="shadow-none">
+          <CardHeader>
+            <CardTitle className="text-sm">{t.venues}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {venues.map((venue) => (
+              <div
+                key={venue.name}
+                className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5"
+              >
+                <span className="font-medium">{venue.name}</span>
+                {venue.ok ? (
+                  <span className="font-mono text-xs">
+                    {formatUsd(venue.last)}
+                  </span>
+                ) : (
+                  <span className="text-xs text-red-300">offline</span>
+                )}
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
@@ -356,18 +442,18 @@ export function Dashboard() {
                 <CardTitle className="text-sm">{t.venues}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
-                {data.venues.map((venue) => (
+                {(venues.length ? venues : data.venues).map((venue) => (
                   <div
                     key={venue.name}
                     className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5"
                   >
                     <span className="font-medium">{venue.name}</span>
-                    {venue.ok ? (
+                    {"ok" in venue && venue.ok === false ? (
+                      <span className="text-xs text-red-300">offline</span>
+                    ) : (
                       <span className="font-mono text-xs">
                         {formatUsd(venue.last)}
                       </span>
-                    ) : (
-                      <span className="text-xs text-red-300">offline</span>
                     )}
                   </div>
                 ))}

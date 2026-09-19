@@ -27,7 +27,7 @@ import {
 } from "@/lib/mempool";
 import type { EsploraTx } from "@/lib/types";
 
-const ADDRESS_CONCURRENCY = 8;
+const ADDRESS_CONCURRENCY = 13;
 const BLOCK_PAGES = 2;
 const BLOCK_COUNT = 2;
 
@@ -85,16 +85,17 @@ export async function scanOnchainFlow(
   ]);
   esploraSource = ladder.source === "default" ? "Mempool.space" : ladder.source;
 
-  for (const preview of recent) {
-    const btc = satsToBtc(preview.value ?? 0);
-    if (btc < TAPE_BTC) continue;
+  const largeRecent = recent
+    .filter((preview) => satsToBtc(preview.value ?? 0) >= TAPE_BTC)
+    .slice(0, 6);
+  await mapPool(largeRecent, 3, async (preview) => {
     try {
       const tx = await fetchTx(preview.txid);
       txs.set(tx.txid, tx);
     } catch {
       // skip a single tx failure
     }
-  }
+  });
 
   for (const block of blocks.slice(0, BLOCK_COUNT)) {
     for (let page = 0; page < BLOCK_PAGES; page += 1) {

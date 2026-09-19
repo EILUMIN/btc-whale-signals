@@ -32,6 +32,17 @@ import {
 import { esploraBases, mempoolUrl } from "../src/lib/urls";
 import { TRACKED_EXCHANGE_ADDRESSES } from "../src/lib/exchange-addresses";
 import { dictionaries } from "../src/lib/i18n";
+import {
+  PRICE_STALE_SEC,
+  ageSeconds,
+  formatIsoUtc,
+  isStale,
+} from "../src/lib/format";
+import {
+  parseBinancePrice,
+  parseCoinbaseTicker,
+  parseKrakenTicker,
+} from "../src/lib/price";
 
 function bar(partial: Partial<M1Bar> & { close: number }): M1Bar {
   const close = partial.close;
@@ -333,6 +344,33 @@ const enKeys = Object.keys(dictionaries.en);
 const filKeys = Object.keys(dictionaries.fil);
 if (enKeys.join(",") !== filKeys.join(",")) {
   throw new Error("EN/FIL i18n keys must stay in lockstep");
+}
+
+if (parseBinancePrice({ price: "81375.21" }) !== 81375.21) {
+  throw new Error("binance public last");
+}
+if (parseCoinbaseTicker({ price: "81388.78" }) !== 81388.78) {
+  throw new Error("coinbase public last");
+}
+if (
+  parseKrakenTicker({ result: { XXBTZUSD: { c: ["81386.70", "1"] } } }) !==
+  81386.7
+) {
+  throw new Error("kraken public last");
+}
+
+const quoteIso = "2026-09-19T19:29:22.000Z";
+if (formatIsoUtc(quoteIso) !== "2026-09-19 19:29:22 UTC") {
+  throw new Error(`utc stamp ${formatIsoUtc(quoteIso)}`);
+}
+if (ageSeconds(quoteIso, Date.parse("2026-09-19T19:29:37.000Z")) !== 15) {
+  throw new Error("age seconds");
+}
+if (!isStale(quoteIso, PRICE_STALE_SEC, Date.parse("2026-09-19T19:29:38.000Z"))) {
+  throw new Error("16s quote must be stale and must not be labeled Live");
+}
+if (isStale(quoteIso, PRICE_STALE_SEC, Date.parse("2026-09-19T19:29:30.000Z"))) {
+  throw new Error("8s quote is still fresh");
 }
 
 if (TAPE_BTC !== 10) throw new Error(`tape floor ${TAPE_BTC}`);

@@ -5,9 +5,34 @@ function pad(value: number) {
   return String(value).padStart(2, "0");
 }
 
+export const PRICE_STALE_SEC = 15;
+export const SCAN_STALE_SEC = 90;
+
 export function formatTimestamp(unixSeconds: number) {
   const date = new Date(unixSeconds * 1000);
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} UTC`;
+}
+
+export function formatIsoUtc(iso: string) {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  return formatTimestamp(Math.floor(ms / 1000));
+}
+
+export function ageSeconds(iso: string, nowMs = Date.now()): number | null {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return Math.max(0, Math.round((nowMs - ms) / 1000));
+}
+
+export function isStale(
+  iso: string | null | undefined,
+  limitSec: number,
+  nowMs = Date.now()
+) {
+  if (!iso) return true;
+  const age = ageSeconds(iso, nowMs);
+  return age === null || age > limitSec;
 }
 
 export function formatUsd(value: number) {

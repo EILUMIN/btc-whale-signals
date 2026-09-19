@@ -49,6 +49,14 @@ export type WhaleSignal = {
   seenIn: "mempool" | "address-watch" | "block";
 };
 
+export type VenueTick = {
+  name: string;
+  symbol: string;
+  last: number;
+  ok: boolean;
+  timestamp: string;
+};
+
 export type LivePrice = {
   usd: number;
   change24hPct: number | null;
@@ -56,6 +64,7 @@ export type LivePrice = {
   low24h: number | null;
   source: string;
   timestamp: string;
+  venues?: VenueTick[];
 };
 
 export type TapePrint = {
