@@ -11,6 +11,10 @@ import {
 
 loadServerEnv();
 
+const PRODUCTION_WATCH_URL =
+  process.env.WATCH_TEST_URL?.trim() ||
+  "https://btc-whale-signals.vercel.app/api/alerts/watch-test";
+
 function redact(value: unknown): string {
   const text = String(value ?? "");
   return text.replace(/https:\/\/(?:discord|discordapp)\.com\/api\/webhooks\/[^\s]+/gi, "[webhook-redacted]");
@@ -79,6 +83,51 @@ async function main() {
   }
   if (shouldFireM1Alert("WAIT", candle, null)) {
     throw new Error("WAIT must never send");
+  }
+
+  const remoteToken = process.env.ALERT_TEST_TOKEN?.trim() ?? "";
+  if (remoteToken && process.env.WATCH_TEST_REMOTE === "1") {
+    const first = await fetch(PRODUCTION_WATCH_URL, {
+      method: "POST",
+      headers: {
+        "x-watch-test-token": remoteToken,
+        Accept: "application/json",
+      },
+    });
+    const payload = (await first.json()) as {
+      ok?: boolean;
+      signal?: string;
+      alertPing?: boolean;
+      discordStatus?: string;
+      discordDetail?: string;
+      emailStatus?: string;
+      error?: string;
+      candleKey?: number;
+    };
+    const leaked = JSON.stringify(payload);
+    if (/discord(?:app)?\.com\/api\/webhooks/i.test(leaked)) {
+      throw new Error("production WATCH response leaked a webhook");
+    }
+    const result = {
+      target: PRODUCTION_WATCH_URL,
+      http: first.status,
+      signal: payload.signal,
+      candle: payload.candleKey ?? candle,
+      discord: payload.discordStatus,
+      discordDetail: redact(payload.discordDetail),
+      email: payload.emailStatus,
+      ping: Boolean(payload.alertPing),
+      error: payload.error ?? null,
+    };
+    console.log(JSON.stringify(result, null, 2));
+    if (payload.signal !== "WATCH") throw new Error("remote was not WATCH");
+    if (first.status !== 200 || payload.discordStatus !== "sent") {
+      throw new Error(
+        `production WATCH did not arrive: http ${first.status} ${payload.discordStatus} ${payload.error ?? payload.discordDetail ?? ""}`
+      );
+    }
+    console.log("WATCH_TEST_OK");
+    return;
   }
 
   resetAlertLatch(null);

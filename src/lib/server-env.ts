@@ -35,6 +35,7 @@ export function loadServerEnv(root = process.cwd()) {
 
 export function getDiscordWebhookUrl(): string {
   assertServer();
+  // Server secret only. Never fall back to NEXT_PUBLIC_DISCORD_WEBHOOK_URL.
   return process.env.DISCORD_WEBHOOK_URL?.trim() ?? "";
 }
 

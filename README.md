@@ -4,11 +4,20 @@ Public **BTC-flow monitor** on a **strict 1-minute (M1)** chart. Free sources on
 
 The desk watches **every labeled exchange cluster** in this repo (Binance, Coinbase, Kraken, Bitfinex, OKX, BitMEX, HTX, Bitstamp, Bittrex). Unlabeled wallet-to-wallet size is shown separately. Pending mempool txs include confirmations and a fee-based ETA.
 
-`DISCORD_WEBHOOK_URL` and Gmail SMTP live in **server-side `.env` only** (never `NEXT_PUBLIC_`). To send a WATCH test through the same one-alert-per-M1-candle latch:
+`DISCORD_WEBHOOK_URL` and Gmail SMTP live in **server-side `.env` / Vercel env only** (never `NEXT_PUBLIC_`). Production Discord posts from the Node runtime using that server secret. The dashboard never receives the webhook URL.
+
+To send one **WATCH** test through the same one-alert-per-M1-candle latch (never BUY/SELL):
 
 ```bash
+# Local latch (needs DISCORD_WEBHOOK_URL in .env)
 npm run test:watch-alert
+
+# Production-safe trigger after deploy. Uses local ALERT_TEST_TOKEN as
+# x-watch-test-token; Production still reads DISCORD_WEBHOOK_URL only.
+WATCH_TEST_REMOTE=1 npm run test:watch-alert
 ```
+
+`POST /api/alerts/watch-test` is token-gated (header `x-watch-test-token` or `Authorization: Bearer`), POST-only, and rate-limited. A wrong token returns 401. The route cannot emit a BUY or SELL alert.
 
 Walang RSI. Walang ATR. Ang orihinal na whale system: **on-chain flow + order-book walls**.
 

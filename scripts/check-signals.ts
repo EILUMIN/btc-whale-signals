@@ -43,6 +43,11 @@ import {
   parseCoinbaseTicker,
   parseKrakenTicker,
 } from "../src/lib/price";
+import { getDiscordWebhookUrl } from "../src/lib/server-env";
+import {
+  sha256Hex,
+  watchTestTokenAuthorized,
+} from "../src/lib/watch-test-auth";
 
 function bar(partial: Partial<M1Bar> & { close: number }): M1Bar {
   const close = partial.close;
@@ -429,8 +434,43 @@ if (isDiscordWebhookUrl("https://example.com/api/webhooks/1/abc")) {
   throw new Error("non-discord webhook must be rejected");
 }
 
+if (shouldFireM1Alert("WAIT", 100, null)) {
+  throw new Error("WAIT must never send Discord or email");
+}
+if (!shouldFireM1Alert("WATCH", 100, null)) {
+  throw new Error("first WATCH on a candle must fire");
+}
+if (shouldFireM1Alert("WATCH", 100, 100)) {
+  throw new Error("duplicate WATCH on the same M1 candle must be blocked");
+}
+if (!shouldFireM1Alert("BUY", 101, 100) || !shouldFireM1Alert("SELL", 102, 100)) {
+  throw new Error("BUY/SELL confluence alerts must still fire on a new candle");
+}
+
+const sampleToken = "watch-test-fixture-token-32chars!!";
+const sampleHash = sha256Hex(sampleToken);
+if (!watchTestTokenAuthorized(sampleToken, sampleHash)) {
+  throw new Error("matching watch-test token must authorize");
+}
+if (watchTestTokenAuthorized("wrong-token-value-32chars!!!!!!", sampleHash)) {
+  throw new Error("wrong watch-test token must be rejected");
+}
+if (watchTestTokenAuthorized("", sampleHash) || watchTestTokenAuthorized("short", sampleHash)) {
+  throw new Error("empty/short watch-test token must be rejected");
+}
+
 const prevWebhook = process.env.DISCORD_WEBHOOK_URL;
+const prevPublicWebhook = process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL;
 delete process.env.DISCORD_WEBHOOK_URL;
+process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL =
+  "https://discord.com/api/webhooks/public-must-never-be-used";
+if (getDiscordWebhookUrl()) {
+  throw new Error("NEXT_PUBLIC_DISCORD_WEBHOOK_URL must never be used as the webhook");
+}
+delete process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL;
+if (prevPublicWebhook) {
+  process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL = prevPublicWebhook;
+}
 const recent = mempoolUrl("/mempool/recent");
 if (!recent.startsWith("https://mempool.space/api/mempool/recent")) {
   throw new Error(`expected absolute mempool URL, got ${recent}`);
