@@ -1,10 +1,16 @@
 import nodemailer from "nodemailer";
 import type { M1Snapshot, M1Signal, RiskPlan } from "@/lib/m1";
+import {
+  getDiscordWebhookUrl,
+  getEmailAuth,
+} from "@/lib/server-env";
 
 export type EmailStatus = "sent" | "skipped" | "failed" | "idle";
 
 export const M1_ALERT_SUBJECT =
   "[HIGH-CONFIDENCE CONFLUENCE] M1 Whale Signal Alert";
+
+export const WATCH_TEST_SUBJECT = "[WATCH TEST] M1 Whale Signal Desk";
 
 type Latch = {
   emailedCandle: number | null;
@@ -24,7 +30,7 @@ export function shouldFireM1Alert(
   candleKey: number,
   emailedCandle: number | null
 ): boolean {
-  if (signal !== "BUY" && signal !== "SELL") return false;
+  if (signal !== "BUY" && signal !== "SELL" && signal !== "WATCH") return false;
   if (!Number.isFinite(candleKey)) return false;
   return emailedCandle !== candleKey;
 }
@@ -85,14 +91,43 @@ export function formatM1Email(
   return { subject: M1_ALERT_SUBJECT, text };
 }
 
-export async function sendM1Email(
-  plan: RiskPlan,
-  snap: M1Snapshot
+export function formatWatchTestAlert(snap: M1Snapshot): {
+  subject: string;
+  text: string;
+} {
+  const text = [
+    WATCH_TEST_SUBJECT,
+    "",
+    "WATCH test — not a trade. No BUY/SELL confluence.",
+    "",
+    "This message confirms:",
+    "- Discord webhook works",
+    "- one-alert-per-M1-candle logic works",
+    "- duplicate alerts are blocked",
+    "- Gmail alerts still work",
+    "",
+    `Side: WATCH`,
+    `M1 candle: ${snap.candleKey}`,
+    `Live price: $${snap.live_price.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`,
+    `venues: ${snap.source}`,
+    `when: ${snap.scannedAt}`,
+    "",
+    "Same server-side latch as live BUY/SELL: one Discord post and one Gmail",
+    "per M1 candle. A second fire on this candle is dropped.",
+    "",
+    "Not financial advice.",
+  ].join("\n");
+  return { subject: WATCH_TEST_SUBJECT, text };
+}
+
+export async function sendGmail(
+  subject: string,
+  text: string
 ): Promise<{ status: EmailStatus; detail: string }> {
-  const sender = process.env.EMAIL_SENDER?.trim();
-  const password = process.env.EMAIL_APP_PASSWORD?.trim();
-  const receiver =
-    process.env.EMAIL_RECEIVER?.trim() || "elmer.whaledesk@gmail.com";
+  const { sender, password, receiver } = getEmailAuth();
   if (!sender || !password) {
     return {
       status: "skipped",
@@ -100,7 +135,6 @@ export async function sendM1Email(
         "EMAIL_SENDER / EMAIL_APP_PASSWORD missing in .env — audio ping still fires.",
     };
   }
-  const { subject, text } = formatM1Email(plan, snap);
   try {
     const transporter = nodemailer.createTransport({
       host: "smtp.gmail.com",
@@ -122,6 +156,14 @@ export async function sendM1Email(
   }
 }
 
+export async function sendM1Email(
+  plan: RiskPlan,
+  snap: M1Snapshot
+): Promise<{ status: EmailStatus; detail: string }> {
+  const { subject, text } = formatM1Email(plan, snap);
+  return sendGmail(subject, text);
+}
+
 export function isDiscordWebhookUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -137,11 +179,10 @@ export function isDiscordWebhookUrl(value: string): boolean {
   }
 }
 
-export async function sendDiscordAlert(
-  plan: RiskPlan,
-  snap: M1Snapshot
+export async function postDiscord(
+  content: string
 ): Promise<{ status: EmailStatus; detail: string }> {
-  const webhook = process.env.DISCORD_WEBHOOK_URL?.trim();
+  const webhook = getDiscordWebhookUrl();
   if (!webhook) {
     return {
       status: "skipped",
@@ -154,14 +195,13 @@ export async function sendDiscordAlert(
       detail: "DISCORD_WEBHOOK_URL must be a discord.com webhook.",
     };
   }
-  const { subject, text } = formatM1Email(plan, snap);
   try {
     const response = await fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         username: "Whale Signal Desk",
-        content: `${subject}\n\`\`\`\n${text.slice(0, 1800)}\n\`\`\``,
+        content,
       }),
     });
     if (!response.ok) {
@@ -177,6 +217,28 @@ export async function sendDiscordAlert(
   }
 }
 
+export async function sendDiscordAlert(
+  plan: RiskPlan,
+  snap: M1Snapshot
+): Promise<{ status: EmailStatus; detail: string }> {
+  const { subject, text } = formatM1Email(plan, snap);
+  return postDiscord(`${subject}\n\`\`\`\n${text.slice(0, 1800)}\n\`\`\``);
+}
+
+export async function sendWatchTestChannels(
+  snap: M1Snapshot
+): Promise<{
+  email: { status: EmailStatus; detail: string };
+  discord: { status: EmailStatus; detail: string };
+}> {
+  const { subject, text } = formatWatchTestAlert(snap);
+  const email = await sendGmail(subject, text);
+  const discord = await postDiscord(
+    `${subject}\n\`\`\`\n${text.slice(0, 1800)}\n\`\`\``
+  );
+  return { email, discord };
+}
+
 export async function applyM1AlertLatch(
   snap: M1Snapshot
 ): Promise<M1Snapshot> {
@@ -189,7 +251,13 @@ export async function applyM1AlertLatch(
 
   if (shouldFireM1Alert(snap.signal, snap.candleKey, state.emailedCandle)) {
     ping = true;
-    if (snap.armedPlan) {
+    if (snap.signal === "WATCH") {
+      const result = await sendWatchTestChannels(snap);
+      email = result.email.status;
+      detail = result.email.detail;
+      discord = result.discord.status;
+      discordDetail = result.discord.detail;
+    } else if (snap.armedPlan) {
       const result = await sendM1Email(snap.armedPlan, snap);
       email = result.status;
       detail = result.detail;
@@ -218,4 +286,8 @@ export async function applyM1AlertLatch(
 /** Test helper — do not use in production routes. */
 export function resetAlertLatch(candleKey: number | null = null) {
   g.__m1AlertLatch = { emailedCandle: candleKey };
+}
+
+export function peekAlertLatch(): number | null {
+  return latch().emailedCandle;
 }

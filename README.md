@@ -4,6 +4,12 @@ Public **BTC-flow monitor** on a **strict 1-minute (M1)** chart. Free sources on
 
 The desk watches **every labeled exchange cluster** in this repo (Binance, Coinbase, Kraken, Bitfinex, OKX, BitMEX, HTX, Bitstamp, Bittrex). Unlabeled wallet-to-wallet size is shown separately. Pending mempool txs include confirmations and a fee-based ETA.
 
+`DISCORD_WEBHOOK_URL` and Gmail SMTP live in **server-side `.env` only** (never `NEXT_PUBLIC_`). To send a WATCH test through the same one-alert-per-M1-candle latch:
+
+```bash
+npm run test:watch-alert
+```
+
 Walang RSI. Walang ATR. Ang orihinal na whale system: **on-chain flow + order-book walls**.
 
 ## M1 confluence

@@ -110,7 +110,7 @@ export type RiskPlan = {
   spreadUsd: number;
 };
 
-export type M1Signal = "BUY" | "SELL" | "WAIT";
+export type M1Signal = "BUY" | "SELL" | "WAIT" | "WATCH";
 
 export type M1Snapshot = {
   ok: boolean;

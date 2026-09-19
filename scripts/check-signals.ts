@@ -17,7 +17,9 @@ import {
 } from "../src/lib/m1";
 import {
   M1_ALERT_SUBJECT,
+  WATCH_TEST_SUBJECT,
   formatM1Email,
+  formatWatchTestAlert,
   isDiscordWebhookUrl,
   resetAlertLatch,
   sendDiscordAlert,
@@ -219,6 +221,12 @@ if (shouldFireM1Alert("SELL", 100, 100)) {
 if (shouldFireM1Alert("WAIT", 100, null)) {
   throw new Error("WAIT must not email");
 }
+if (!shouldFireM1Alert("WATCH", 100, null)) {
+  throw new Error("first WATCH on a candle must fire (test channel)");
+}
+if (shouldFireM1Alert("WATCH", 100, 100)) {
+  throw new Error("duplicate WATCH on same M1 candle must not fire");
+}
 if (!shouldFireM1Alert("BUY", 101, 100)) {
   throw new Error("next M1 candle may fire again");
 }
@@ -282,6 +290,43 @@ if (!mail.text.includes("Unlabeled (wallet↔wallet)")) {
 }
 if (!mail.text.includes("Pending mempool")) {
   throw new Error("email must report pending BTC");
+}
+
+const watchBody = formatWatchTestAlert({
+  ok: true,
+  error: null,
+  timeframe: "1m",
+  candleKey: 100,
+  live_price: 64_210,
+  live_vwap: 64_200,
+  cvd: 12,
+  cvdLabel: "buying delta",
+  signal: "WATCH",
+  recommendation: "WATCH test",
+  spoofChecked: false,
+  spoofCleared: false,
+  armedPlan: null,
+  puPrimePlan: null,
+  walls: [],
+  askWalls: [],
+  bidWalls: [],
+  bars: [],
+  flow: emptyOnchainFlow(),
+  venues: [],
+  scannedAt: "2026-09-18T00:00:00.000Z",
+  source: "binance + coinbase + kraken",
+});
+if (watchBody.subject !== WATCH_TEST_SUBJECT) {
+  throw new Error(`watch subject ${watchBody.subject}`);
+}
+if (!watchBody.text.includes("Discord webhook works")) {
+  throw new Error("watch body must confirm Discord");
+}
+if (!watchBody.text.includes("duplicate alerts are blocked")) {
+  throw new Error("watch body must confirm duplicate block");
+}
+if (!watchBody.text.includes("Gmail alerts still work")) {
+  throw new Error("watch body must confirm Gmail");
 }
 
 const enKeys = Object.keys(dictionaries.en);
