@@ -110,6 +110,9 @@ export type EsploraVout = {
 
 export type EsploraTx = {
   txid: string;
+  fee?: number;
+  weight?: number;
+  size?: number;
   vin: EsploraVin[];
   vout: EsploraVout[];
   status: {

@@ -1,25 +1,35 @@
 import {
   PU_PRIME_GAP_USD,
   PU_PRIME_SPREAD_USD,
+  TAPE_BTC,
+  WHALE_BTC,
   buildWallPlan,
   clusterWalls,
   cvdFromBars,
   decideM1Confluence,
+  emptyOnchainFlow,
   lotsGuide,
   puPrimeQuote,
   toPuPrimePlan,
   wallStillReal,
   type M1Bar,
-  type OnchainFlow,
   type WhaleWall,
 } from "../src/lib/m1";
 import {
   M1_ALERT_SUBJECT,
   formatM1Email,
+  isDiscordWebhookUrl,
   resetAlertLatch,
+  sendDiscordAlert,
   shouldFireM1Alert,
 } from "../src/lib/signal-alert";
-import { mempoolUrl } from "../src/lib/urls";
+import {
+  confirmationsFor,
+  estimateArrival,
+} from "../src/lib/mempool";
+import { esploraBases, mempoolUrl } from "../src/lib/urls";
+import { TRACKED_EXCHANGE_ADDRESSES } from "../src/lib/exchange-addresses";
+import { dictionaries } from "../src/lib/i18n";
 
 function bar(partial: Partial<M1Bar> & { close: number }): M1Bar {
   const close = partial.close;
@@ -52,12 +62,7 @@ function wall(
   };
 }
 
-const emptyFlow: OnchainFlow = {
-  inflows: 0,
-  outflows: 0,
-  netflow: 0,
-  prints: [],
-};
+const emptyFlow = emptyOnchainFlow();
 
 const clustered = clusterWalls(
   [
@@ -120,6 +125,18 @@ const buy = decideM1Confluence({
   cvd: 15,
 });
 if (buy.signal !== "BUY") throw new Error(`expected BUY got ${buy.signal}`);
+
+const unlabeledDoesNotSell = decideM1Confluence({
+  flow: { ...emptyFlow, unlabeled: 640, netflow: 0 },
+  live: 65010,
+  bar: bar({ high: 65040, low: 64950, close: 65010 }),
+  askWalls: [wall("ask", 65020, 720)],
+  bidWalls: [],
+  cvd: -18,
+});
+if (unlabeledDoesNotSell.signal !== "WAIT") {
+  throw new Error("unlabeled wallet-to-wallet size must not fire SELL");
+}
 
 const smallWall = decideM1Confluence({
   flow: { ...emptyFlow, outflows: 540, netflow: -540 },
@@ -226,7 +243,16 @@ const mail = formatM1Email(plan, {
   askWalls: [],
   bidWalls: [],
   bars: [],
-  flow: { inflows: 0, outflows: 540, netflow: -540, prints: [] },
+  flow: {
+    ...emptyOnchainFlow(),
+    outflows: 540,
+    netflow: -540,
+    unlabeled: 197,
+    pendingBtc: 40,
+    confirmedBtc: 500,
+    watchedWallets: TRACKED_EXCHANGE_ADDRESSES.length,
+    esploraSource: "Mempool.space",
+  },
   venues: [],
   scannedAt: "2026-09-18T00:00:00.000Z",
   source: "binance + coinbase + kraken",
@@ -251,7 +277,77 @@ if (!mail.text.includes("PuPrime Levels (MT4/MT5 Guide)")) {
   throw new Error("puprime book label");
 }
 if (!mail.text.includes("Lots")) throw new Error("lots in email");
+if (!mail.text.includes("Unlabeled (wallet↔wallet)")) {
+  throw new Error("email must report unlabeled flow");
+}
+if (!mail.text.includes("Pending mempool")) {
+  throw new Error("email must report pending BTC");
+}
 
+const enKeys = Object.keys(dictionaries.en);
+const filKeys = Object.keys(dictionaries.fil);
+if (enKeys.join(",") !== filKeys.join(",")) {
+  throw new Error("EN/FIL i18n keys must stay in lockstep");
+}
+
+if (TAPE_BTC !== 10) throw new Error(`tape floor ${TAPE_BTC}`);
+if (WHALE_BTC !== 500) throw new Error(`whale ${WHALE_BTC}`);
+if (TRACKED_EXCHANGE_ADDRESSES.length < 20) {
+  throw new Error(`expected full exchange cluster list, got ${TRACKED_EXCHANGE_ADDRESSES.length}`);
+}
+
+const bases = esploraBases();
+if (!bases.some((base) => base.includes("mempool.space"))) {
+  throw new Error("Mempool.space must be an Esplora base");
+}
+if (!bases.some((base) => base.includes("blockstream.info"))) {
+  throw new Error("Blockstream must be the Esplora fallback");
+}
+
+const pendingTx = {
+  txid: "x",
+  vin: [],
+  vout: [],
+  status: { confirmed: false },
+};
+if (confirmationsFor(pendingTx, 900_000) !== 0) {
+  throw new Error("unconfirmed tx must have 0 confirmations");
+}
+const mined = {
+  ...pendingTx,
+  status: { confirmed: true, block_height: 900_000 },
+};
+if (confirmationsFor(mined, 900_002) !== 3) {
+  throw new Error(`confs ${confirmationsFor(mined, 900_002)}`);
+}
+
+const nextBlock = estimateArrival(40, {
+  fastestFee: 20,
+  halfHourFee: 10,
+  hourFee: 5,
+  source: "test",
+}, false);
+if (nextBlock.label !== "~10 min (next block)") {
+  throw new Error(`eta ${nextBlock.label}`);
+}
+if (estimateArrival(1, {
+  fastestFee: 20,
+  halfHourFee: 10,
+  hourFee: 5,
+  source: "test",
+}, true).label !== "in a block") {
+  throw new Error("confirmed ETA");
+}
+
+if (!isDiscordWebhookUrl("https://discord.com/api/webhooks/1/abc")) {
+  throw new Error("valid discord webhook rejected");
+}
+if (isDiscordWebhookUrl("https://example.com/api/webhooks/1/abc")) {
+  throw new Error("non-discord webhook must be rejected");
+}
+
+const prevWebhook = process.env.DISCORD_WEBHOOK_URL;
+delete process.env.DISCORD_WEBHOOK_URL;
 const recent = mempoolUrl("/mempool/recent");
 if (!recent.startsWith("https://mempool.space/api/mempool/recent")) {
   throw new Error(`expected absolute mempool URL, got ${recent}`);
@@ -268,4 +364,37 @@ console.log(
   "size",
   plan.sizeBtc
 );
-console.log("ok");
+
+void sendDiscordAlert(plan, {
+  ok: true,
+  error: null,
+  timeframe: "1m",
+  candleKey: 100,
+  live_price: 64_210,
+  live_vwap: 64_200,
+  cvd: 12,
+  cvdLabel: "buying delta",
+  signal: "BUY",
+  recommendation: "test",
+  spoofChecked: true,
+  spoofCleared: true,
+  armedPlan: plan,
+  puPrimePlan: toPuPrimePlan(plan),
+  walls: [],
+  askWalls: [],
+  bidWalls: [],
+  bars: [],
+  flow: emptyOnchainFlow(),
+  venues: [],
+  scannedAt: "2026-09-18T00:00:00.000Z",
+  source: "binance + coinbase + kraken",
+}).then((discordSkip) => {
+  if (discordSkip.status !== "skipped") {
+    throw new Error(`discord without webhook should skip, got ${discordSkip.status}`);
+  }
+  if (prevWebhook) process.env.DISCORD_WEBHOOK_URL = prevWebhook;
+  console.log("ok");
+}).catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

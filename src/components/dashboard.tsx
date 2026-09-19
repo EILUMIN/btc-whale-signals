@@ -13,7 +13,7 @@ import type { M1Snapshot, RiskPlan, WhaleWall } from "@/lib/m1";
 import { lotsGuide, puPrimeQuote } from "@/lib/m1";
 import { matrixApiUrl, priceApiUrl } from "@/lib/urls";
 import type { LivePrice } from "@/lib/types";
-import { Radio, RefreshCw, Volume2 } from "lucide-react";
+import { ExternalLink, Radio, RefreshCw, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 function playSignalPing() {
@@ -207,7 +207,7 @@ export function Dashboard() {
         </div>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label={t.liveCvd}
           value={data ? data.cvd.toFixed(2) : "—"}
@@ -226,6 +226,12 @@ export function Dashboard() {
           value={data ? formatBtc(data.flow.inflows) : "—"}
           hint={t.sellHint}
           tone={(data?.flow.inflows ?? 0) >= 500 ? "sell" : undefined}
+        />
+        <StatCard
+          label={t.onchainOut}
+          value={data ? formatBtc(data.flow.outflows) : "—"}
+          hint={t.buyHint}
+          tone={(data?.flow.outflows ?? 0) >= 500 ? "buy" : undefined}
         />
         <StatCard
           label={t.m1Signal}
@@ -268,6 +274,20 @@ export function Dashboard() {
           <span className="text-red-300">
             {interpolate(t.emailFailed, { detail: data.emailDetail ?? "" })}
           </span>
+        )}
+        {data?.discordStatus === "sent" && (
+          <span className="text-emerald-300">{t.discordSent}</span>
+        )}
+        {data?.discordStatus === "skipped" && (
+          <span className="text-amber-300">{t.discordSkipped}</span>
+        )}
+        {data?.discordStatus === "failed" && (
+          <span className="text-red-300">
+            {interpolate(t.discordFailed, { detail: data.discordDetail ?? "" })}
+          </span>
+        )}
+        {(data?.discordStatus === "idle" || !data?.discordStatus) && (
+          <span>{t.discordIdle}</span>
         )}
         {data?.spoofChecked && data.spoofCleared && (
           <span className="text-emerald-300">{t.spoofOk}</span>
@@ -351,9 +371,6 @@ export function Dashboard() {
                     )}
                   </div>
                 ))}
-                <p className="text-xs text-muted-foreground">
-                  {t.onchainOut}: {formatBtc(data.flow.outflows)}
-                </p>
               </CardContent>
             </Card>
             <FlowTape data={data} t={t} />
@@ -364,6 +381,7 @@ export function Dashboard() {
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>{t.inflowExplain}</p>
                 <p>{t.outflowExplain}</p>
+                <p>{t.unlabeledExplain}</p>
                 <p>{t.spoofExplain}</p>
                 <p>{t.puPrimeExplain}</p>
                 <p>{t.profitNote}</p>
@@ -506,41 +524,123 @@ function WallList({ walls, t }: { walls: WhaleWall[]; t: Dictionary }) {
   );
 }
 
+function kindLabel(kind: string, t: Dictionary) {
+  if (kind === "inflow") return t.inflow;
+  if (kind === "outflow") return t.outflow;
+  if (kind === "internal") return t.internal;
+  return t.unlabeled;
+}
+
 function FlowTape({ data, t }: { data: M1Snapshot; t: Dictionary }) {
+  const flow = data.flow;
   return (
     <Card className="shadow-none">
-      <CardHeader>
+      <CardHeader className="space-y-1">
         <CardTitle className="text-sm">{t.flowTitle}</CardTitle>
+        <p className="text-[11px] text-muted-foreground">
+          {interpolate(t.esploraVia, { source: flow.esploraSource })} ·{" "}
+          {interpolate(t.watchedWallets, { count: flow.watchedWallets })} ·{" "}
+          {t.flowWindow}
+        </p>
       </CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        {data.flow.prints.length === 0 && (
+      <CardContent className="space-y-3 text-sm">
+        <div className="grid grid-cols-2 gap-2">
+          <MiniStat
+            label={t.unlabeledFlow}
+            value={formatBtc(flow.unlabeled)}
+            muted
+          />
+          <MiniStat
+            label={t.internal}
+            value={formatBtc(flow.internal)}
+            muted
+          />
+          <MiniStat
+            label={t.pendingFlow}
+            value={formatBtc(flow.pendingBtc)}
+          />
+          <MiniStat
+            label={t.confirmedFlow}
+            value={formatBtc(flow.confirmedBtc)}
+          />
+        </div>
+        {flow.prints.length === 0 && (
           <p className="text-muted-foreground">{t.flowEmpty}</p>
         )}
-        {data.flow.prints.slice(0, 8).map((print) => (
-          <div
-            key={print.txid}
-            className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5"
-          >
-            <span
-              className={
-                print.kind === "inflow"
-                  ? "text-red-300"
-                  : print.kind === "outflow"
-                    ? "text-emerald-300"
-                    : "text-muted-foreground"
-              }
+        <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+          {flow.prints.slice(0, 24).map((print) => (
+            <a
+              key={print.txid}
+              href={print.explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="block rounded-md border border-border/60 px-2 py-2 hover:border-amber-500/40"
             >
-              {print.kind === "inflow"
-                ? t.inflow
-                : print.kind === "outflow"
-                  ? t.outflow
-                  : print.kind}
-            </span>
-            <span className="font-mono text-xs">{formatBtc(print.btc)}</span>
-          </div>
-        ))}
+              <div className="flex items-start justify-between gap-2">
+                <span
+                  className={`text-xs font-semibold uppercase tracking-wider ${
+                    print.kind === "inflow"
+                      ? "text-red-300"
+                      : print.kind === "outflow"
+                        ? "text-emerald-300"
+                        : print.kind === "internal"
+                          ? "text-amber-300"
+                          : "text-muted-foreground"
+                  }`}
+                >
+                  {kindLabel(print.kind, t)}
+                </span>
+                <span className="font-mono text-xs font-semibold">
+                  {formatBtc(print.btc)}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {t.tapeFrom} {print.fromLabel} → {t.tapeTo} {print.toLabel}
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                <span>
+                  {print.pending
+                    ? t.pendingPrint
+                    : interpolate(t.confirmedPrint, { n: print.confirmations })}
+                </span>
+                <span>
+                  {t.eta}: {print.etaLabel}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <ExternalLink className="size-3" />
+                  {t.openExplorer}
+                </span>
+              </div>
+            </a>
+          ))}
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  muted,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-border/60 px-2 py-1.5">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <p
+        className={`font-mono text-sm font-semibold ${
+          muted ? "text-muted-foreground" : ""
+        }`}
+      >
+        {value}
+      </p>
+    </div>
   );
 }
 

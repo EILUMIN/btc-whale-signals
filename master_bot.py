@@ -22,8 +22,10 @@ import ssl
 import smtplib
 import sys
 import time
+import urllib.error
 import urllib.request
 from collections import defaultdict
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -51,6 +53,7 @@ LOT_STEP = 0.01
 BOOK_LIMIT = 500
 M1_LIMIT = 90
 FLOW_WINDOW_SEC = 60 * 60
+TAPE_BTC = 10.0
 LOOP_SEC = 15
 HTTP_TIMEOUT = 12
 GMAIL_SMTP_HOST = "smtp.gmail.com"
@@ -61,14 +64,36 @@ USER_AGENT = (
     "Mozilla/5.0 (compatible; MasterBot/2.0; +https://github.com/EILUMIN/btc-whale-signals)"
 )
 MEMPOOL_API = os.environ.get("MEMPOOL_API_BASE", "https://mempool.space/api").rstrip("/")
+BLOCKSTREAM_API = os.environ.get("BLOCKSTREAM_API_BASE", "https://blockstream.info/api").rstrip("/")
+ESPLORA_BASES = list(dict.fromkeys([MEMPOOL_API, BLOCKSTREAM_API]))
 
 EXCHANGE_WALLETS = {
     "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo": "Binance",
     "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97": "Binance",
+    "3M219KR5vEneNb47ewrPfWyb5jQ2DjxRP6": "Binance",
+    "bc1qm34lsc65zpw79lxes69zkqmk6ee3ewf0j77s3h": "Binance",
+    "1NDyJtNTjmwk5xPNhjgAMu4HDHigtobu1s": "Binance",
+    "3JZq4atUahhuA9rLh7JfTUiCTCoRg3S8oS": "Binance",
+    "3LYJfcfHPXYJreMsASk2jkn69LWEYKzexb": "Binance",
+    "1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ": "Binance",
+    "385cR5DM96n1HvBDMzLHPYcw89fZAXULJP": "Binance",
+    "1LQoWist8KkaUXSPKZHNvEyfrEkPHzSsCd": "Binance",
+    "3LQeSjqS5a2sJDfcQpCUEGmCUS9skryALt": "Binance",
     "3Kzh9qAqVWQhEsfQz7zEQL1EuSx5tyNLNS": "Coinbase",
     "3Nxwenay9Z8Lc9JBiywTo1sZkyn2nQaaKR": "Coinbase",
     "3D2oetdNuZUqQHPJmcMDDHYoqkyNVsFk9r": "Bitfinex",
     "1Kr6QSydW9bFQG1mXiPNNu6WpJGmUa9i1g": "Bitfinex",
+    "bc1qazcm763858nkj2dj986etajv6wquslv8uxwczt": "Bitfinex",
+    "1FfmbHfnpaZjKFvyi1okTjJJusN455paPH": "Bitfinex",
+    "bc1ql49ydapnjafl5t2cp9zqpjwe6pdgmxy98859v2": "OKX",
+    "bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6": "OKX",
+    "bc1q5shngj24323nsrmxv99st02na6srekfctt30ch": "Kraken",
+    "3FupZp77ySr7jwoLYEJ9mwzJpvoNBXsBnE": "Kraken",
+    "3BMEXqGpG4FxBA1KWhRFufXfSTRgzfDBhJ": "BitMEX",
+    "3BMEXDR3sAq2xDx2SSivNT6BGUjrF4oGCX": "BitMEX",
+    "1HckjUpRGcrrRAtFaaCAUaGjsPx9oYmLaZ": "HTX",
+    "1KYiKJEfdJtap9QX2v9BxAdVwzSpoVu4Uo": "Bitstamp",
+    "3NNsvp7dfevkKqwkM6ZPZ2huUMPtFP1166": "Bittrex",
 }
 
 ROUTES = [
@@ -118,6 +143,19 @@ def http_json(url: str) -> Any:
     ctx = ssl.create_default_context()
     with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT, context=ctx) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def esplora_json(path: str) -> tuple[Any, str]:
+    suffix = path if path.startswith("/") else f"/{path}"
+    last: Exception | None = None
+    for base in ESPLORA_BASES:
+        try:
+            data = http_json(f"{base}{suffix}")
+            source = "Blockstream" if "blockstream" in base else "Mempool.space"
+            return data, source
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+    raise last or RuntimeError(f"Esplora {suffix} failed")
 
 
 def make_exchange(exchange_id: str) -> Any:
@@ -378,7 +416,7 @@ def session_vwap(bars: list[dict[str, float]]) -> float:
     return pv / vol if vol > 0 else 0.0
 
 
-def classify_tx(tx: dict[str, Any]) -> tuple[str, float, float]:
+def classify_tx(tx: dict[str, Any]) -> tuple[str, float, float, float]:
     vins = tx.get("vin") or []
     vouts = tx.get("vout") or []
     from_ex = 0.0
@@ -409,63 +447,131 @@ def classify_tx(tx: dict[str, Any]) -> tuple[str, float, float]:
             to_wal += btc
     from_is_ex = from_ex > from_wal
     to_is_ex = to_ex > to_wal
+    total = sum(float(vout.get("value") or 0) / SATS for vout in vouts)
     if from_is_ex and to_is_ex:
-        return "internal", 0.0, 0.0
+        return "internal", 0.0, 0.0, total
     if not from_is_ex and to_is_ex:
-        return "inflow", to_ex, 0.0
+        return "inflow", to_ex, 0.0, to_ex or total
     if from_is_ex and not to_is_ex:
-        return "outflow", 0.0, to_wal or from_ex
-    return "unlabeled", 0.0, 0.0
+        sized = to_wal or from_ex
+        return "outflow", 0.0, sized, sized
+    return "unlabeled", 0.0, 0.0, total
+
+
+def _entity_label(addr: str | None) -> str:
+    if addr and addr in EXCHANGE_WALLETS:
+        return EXCHANGE_WALLETS[addr]
+    return "Wallet / cold storage"
 
 
 def scan_onchain() -> dict[str, Any]:
     cutoff = time.time() - FLOW_WINDOW_SEC
     inflows = 0.0
     outflows = 0.0
+    unlabeled = 0.0
+    internal = 0.0
+    pending_btc = 0.0
+    confirmed_btc = 0.0
     prints: list[dict[str, Any]] = []
     txs: dict[str, dict[str, Any]] = {}
+    esplora_source = "Mempool.space"
+
     try:
-        recent = http_json(f"{MEMPOOL_API}/mempool/recent")
+        recent, esplora_source = esplora_json("/mempool/recent")
         for preview in recent:
             value = float(preview.get("value") or 0) / SATS
-            if value < 50:
+            if value < TAPE_BTC:
                 continue
             txid = preview.get("txid")
             if not txid:
                 continue
             try:
-                txs[txid] = http_json(f"{MEMPOOL_API}/tx/{txid}")
+                tx, esplora_source = esplora_json(f"/tx/{txid}")
+                txs[txid] = tx
             except Exception:
                 continue
     except Exception:
         pass
+
     try:
-        blocks = http_json(f"{MEMPOOL_API}/v1/blocks")
+        try:
+            blocks, esplora_source = esplora_json("/v1/blocks")
+        except Exception:
+            blocks, esplora_source = esplora_json("/blocks")
         for block in blocks[:2]:
+            block_id = block.get("id")
+            if not block_id:
+                continue
+            for start in (0, 25):
+                path = f"/block/{block_id}/txs" if start == 0 else f"/block/{block_id}/txs/{start}"
+                try:
+                    rows, esplora_source = esplora_json(path)
+                    for tx in rows:
+                        txs[tx["txid"]] = tx
+                    if len(rows) < 25:
+                        break
+                except Exception:
+                    break
+    except Exception:
+        pass
+
+    addresses = list(EXCHANGE_WALLETS)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futs = {pool.submit(esplora_json, f"/address/{addr}/txs"): addr for addr in addresses}
+        for fut in as_completed(futs):
             try:
-                rows = http_json(f"{MEMPOOL_API}/block/{block['id']}/txs")
+                rows, esplora_source = fut.result()
                 for tx in rows:
                     txs[tx["txid"]] = tx
             except Exception:
                 continue
-    except Exception:
-        pass
 
     for tx in txs.values():
         status = tx.get("status") or {}
         when = float(status.get("block_time") or time.time())
         if when < cutoff:
             continue
-        kind, inflow, outflow = classify_tx(tx)
-        inflows += inflow
-        outflows += outflow
-        sized = inflow or outflow
-        if sized >= 50:
-            prints.append({"txid": tx.get("txid"), "kind": kind, "btc": round(sized, 2)})
+        kind, inflow, outflow, sized = classify_tx(tx)
+        if sized < TAPE_BTC:
+            continue
+        if kind == "inflow":
+            inflows += inflow
+        elif kind == "outflow":
+            outflows += outflow
+        elif kind == "internal":
+            internal += sized
+        else:
+            unlabeled += sized
+        confirmed = bool(status.get("confirmed"))
+        if confirmed:
+            confirmed_btc += sized
+        else:
+            pending_btc += sized
+        vins = tx.get("vin") or []
+        vouts = tx.get("vout") or []
+        from_addr = ((vins[0].get("prevout") or {}).get("scriptpubkey_address") if vins else None)
+        to_addr = (vouts[0].get("scriptpubkey_address") if vouts else None)
+        prints.append(
+            {
+                "txid": tx.get("txid"),
+                "kind": kind,
+                "btc": round(sized, 2),
+                "pending": not confirmed,
+                "from": _entity_label(from_addr),
+                "to": _entity_label(to_addr),
+            }
+        )
+    prints.sort(key=lambda row: (not row["pending"], -(row["btc"] or 0)))
     return {
         "inflows": round(inflows, 2),
         "outflows": round(outflows, 2),
-        "prints": prints[:12],
+        "unlabeled": round(unlabeled, 2),
+        "internal": round(internal, 2),
+        "pendingBtc": round(pending_btc, 2),
+        "confirmedBtc": round(confirmed_btc, 2),
+        "watchedWallets": len(EXCHANGE_WALLETS),
+        "esploraSource": esplora_source,
+        "prints": prints[:24],
     }
 
 
@@ -535,8 +641,12 @@ def send_email_alert(plan: dict[str, Any], snap: dict[str, Any]) -> str:
         f"Safe size (1% of $1,000): {plan['sizeBtc']:.6f} BTC\n"
         f"Whale wall: ${plan['wallPrice']:,.2f}\n\n"
         f"{pu_block}"
-        f"On-chain inflow: {snap['flow']['inflows']:.2f} BTC\n"
-        f"On-chain outflow: {snap['flow']['outflows']:.2f} BTC\n"
+        f"On-chain labeled inflow: {snap['flow']['inflows']:.2f} BTC\n"
+        f"On-chain labeled outflow: {snap['flow']['outflows']:.2f} BTC\n"
+        f"Unlabeled (wallet↔wallet): {snap['flow'].get('unlabeled', 0):.2f} BTC\n"
+        f"Pending mempool: {snap['flow'].get('pendingBtc', 0):.2f} BTC\n"
+        f"Watched wallets: {snap['flow'].get('watchedWallets', 0)}\n"
+        f"Esplora: {snap['flow'].get('esploraSource', 'Mempool.space')}\n"
         f"CVD (M1): {snap['cvd']:.2f}\n"
         f"Live price: ${snap['live']:,.2f}\n"
         f"when: {snap['when']}\n\n"
@@ -553,6 +663,59 @@ def send_email_alert(plan: dict[str, Any], snap: dict[str, Any]) -> str:
             smtp.login(sender, password)
             smtp.send_message(msg)
         return "sent"
+    except Exception as exc:  # noqa: BLE001
+        return f"failed:{exc}"[:180]
+
+
+def is_discord_webhook(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    host = (parsed.hostname or "").lower()
+    discord_host = (
+        host == "discord.com"
+        or host == "discordapp.com"
+        or host.endswith(".discord.com")
+        or host.endswith(".discordapp.com")
+    )
+    return discord_host and "/api/webhooks/" in (parsed.path or "")
+
+
+def send_discord_alert(plan: dict[str, Any], snap: dict[str, Any]) -> str:
+    webhook = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+    if not webhook:
+        return "skipped"
+    if not is_discord_webhook(webhook):
+        return "failed:not discord webhook"
+    body = (
+        f"{M1_ALERT_SUBJECT}\n"
+        f"{plan['side']}  ENTRY ${plan['entry']:,.2f}  SL ${plan['stop']:,.2f}  "
+        f"TP ${plan['takeProfit']:,.2f}\n"
+        f"labeled in {snap['flow']['inflows']:.2f}  out {snap['flow']['outflows']:.2f}  "
+        f"unlabeled {snap['flow'].get('unlabeled', 0):.2f}\n"
+        f"{snap['why']}\n"
+        "Not financial advice."
+    )
+    payload = json.dumps(
+        {
+            "username": "Whale Signal Desk",
+            "content": f"{M1_ALERT_SUBJECT}\n```\n{body[:1800]}\n```",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        webhook,
+        data=payload,
+        method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT, context=ssl.create_default_context()) as resp:
+            if 200 <= resp.status < 300:
+                return "sent"
+            return f"failed:{resp.status}"
+    except urllib.error.HTTPError as exc:
+        return f"failed:{exc.code}"[:180]
     except Exception as exc:  # noqa: BLE001
         return f"failed:{exc}"[:180]
 
@@ -642,7 +805,9 @@ def render(snap: dict[str, Any]) -> str:
     lines = [
         f"Whale Signal Desk  M1  {snap['when']}",
         f"live ${snap['live']:,.2f}  PU Prime ${snap['live'] - PU_PRIME_GAP_USD:,.2f}  VWAP ${snap['vwap']:,.2f}  CVD {snap['cvd']:.2f}",
-        f"inflow {snap['flow']['inflows']:.2f} BTC  outflow {snap['flow']['outflows']:.2f} BTC",
+        f"labeled in {snap['flow']['inflows']:.2f} BTC  out {snap['flow']['outflows']:.2f} BTC  "
+        f"unlabeled {snap['flow'].get('unlabeled', 0):.2f} BTC  pending {snap['flow'].get('pendingBtc', 0):.2f} BTC",
+        f"on-chain {snap['flow'].get('esploraSource', 'Mempool.space')}  wallets {snap['flow'].get('watchedWallets', 0)}",
         f"signal {snap['signal']}  {snap['why']}",
         f"venues {snap['source']}",
     ]
@@ -675,8 +840,12 @@ def main() -> int:
         print("\n" + render(snap), flush=True)
         if snap["signal"] in {"BUY", "SELL"} and snap["plan"] and emailed_candle != snap["candle"]:
             status = send_email_alert(snap["plan"], snap)
+            discord = send_discord_alert(snap["plan"], snap)
             emailed_candle = snap["candle"]
-            print(f"email {status}  subject {M1_ALERT_SUBJECT}", flush=True)
+            print(
+                f"email {status}  discord {discord}  subject {M1_ALERT_SUBJECT}",
+                flush=True,
+            )
         if args.once:
             return 0 if snap["ok"] else 1
         time.sleep(LOOP_SEC)

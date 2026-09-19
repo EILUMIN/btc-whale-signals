@@ -14,6 +14,8 @@ export const RISK_USD = 10;
 export const RR_MULT = 3;
 export const BOOK_LIMIT = 500;
 export const FLOW_WINDOW_SEC = 60 * 60;
+/** Tape / monitor floor. Confluence still requires WHALE_BTC. */
+export const TAPE_BTC = 10;
 /** PU Prime BTCUSD typically prints ~$130 below Binance/Coinbase. */
 export const PU_PRIME_GAP_USD = 130;
 /** Typical PU Prime BTCUSD spread to pad the MT4/MT5 stop. */
@@ -45,17 +47,50 @@ export type M1Bar = {
   sellVolume: number;
 };
 
+export type FlowKind = "inflow" | "outflow" | "internal" | "unlabeled";
+
+export type FlowPrint = {
+  txid: string;
+  btc: number;
+  kind: FlowKind;
+  when: string;
+  confirmed: boolean;
+  confirmations: number;
+  pending: boolean;
+  etaMinutes: number | null;
+  etaLabel: string;
+  fromLabel: string;
+  toLabel: string;
+  explorerUrl: string;
+};
+
 export type OnchainFlow = {
   inflows: number;
   outflows: number;
+  unlabeled: number;
+  internal: number;
   netflow: number;
-  prints: Array<{
-    txid: string;
-    btc: number;
-    kind: "inflow" | "outflow" | "internal" | "unlabeled";
-    when: string;
-  }>;
+  pendingBtc: number;
+  confirmedBtc: number;
+  watchedWallets: number;
+  esploraSource: string;
+  prints: FlowPrint[];
 };
+
+export function emptyOnchainFlow(): OnchainFlow {
+  return {
+    inflows: 0,
+    outflows: 0,
+    unlabeled: 0,
+    internal: 0,
+    netflow: 0,
+    pendingBtc: 0,
+    confirmedBtc: 0,
+    watchedWallets: 0,
+    esploraSource: "none",
+    prints: [],
+  };
+}
 
 export type RiskPlan = {
   side: "BUY" | "SELL";
@@ -103,6 +138,8 @@ export type M1Snapshot = {
   alertPing?: boolean;
   emailStatus?: "sent" | "skipped" | "failed" | "idle";
   emailDetail?: string;
+  discordStatus?: "sent" | "skipped" | "failed" | "idle";
+  discordDetail?: string;
 };
 
 export function candleKeyUnix(unixMs = Date.now()): number {

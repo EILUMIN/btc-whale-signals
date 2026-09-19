@@ -9,6 +9,7 @@ import {
   clusterWalls,
   cvdFromBars,
   decideM1Confluence,
+  emptyOnchainFlow,
   toPuPrimePlan,
   wallStillReal,
   type M1Bar,
@@ -422,12 +423,14 @@ export function emptyM1Snapshot(error: string): M1Snapshot {
     askWalls: [],
     bidWalls: [],
     bars: [],
-    flow: { inflows: 0, outflows: 0, netflow: 0, prints: [] },
+    flow: emptyOnchainFlow(),
     venues: [],
     scannedAt: new Date().toISOString(),
     source: "error",
     alertPing: false,
     emailStatus: "idle",
     emailDetail: "",
+    discordStatus: "idle",
+    discordDetail: "",
   };
 }

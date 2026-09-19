@@ -66,8 +66,14 @@ export function formatM1Email(
     `Whale wall: ${money(plan.wallPrice)}`,
     "",
     ...puLines,
-    `On-chain inflow: ${snap.flow.inflows.toFixed(2)} BTC`,
-    `On-chain outflow: ${snap.flow.outflows.toFixed(2)} BTC`,
+    `On-chain labeled inflow: ${snap.flow.inflows.toFixed(2)} BTC`,
+    `On-chain labeled outflow: ${snap.flow.outflows.toFixed(2)} BTC`,
+    `Unlabeled (wallet↔wallet): ${snap.flow.unlabeled.toFixed(2)} BTC`,
+    `Internal (exchange↔exchange): ${snap.flow.internal.toFixed(2)} BTC`,
+    `Pending mempool: ${snap.flow.pendingBtc.toFixed(2)} BTC`,
+    `Confirmed: ${snap.flow.confirmedBtc.toFixed(2)} BTC`,
+    `Watched wallets: ${snap.flow.watchedWallets}`,
+    `Esplora: ${snap.flow.esploraSource}`,
     `CVD (M1): ${snap.cvd.toFixed(2)} (${snap.cvdLabel})`,
     `Live price: ${money(snap.live_price)}`,
     `M1 candle: ${snap.candleKey}`,
@@ -116,6 +122,61 @@ export async function sendM1Email(
   }
 }
 
+export function isDiscordWebhookUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    const discordHost =
+      host === "discord.com" ||
+      host === "discordapp.com" ||
+      host.endsWith(".discord.com") ||
+      host.endsWith(".discordapp.com");
+    return discordHost && url.pathname.includes("/api/webhooks/");
+  } catch {
+    return false;
+  }
+}
+
+export async function sendDiscordAlert(
+  plan: RiskPlan,
+  snap: M1Snapshot
+): Promise<{ status: EmailStatus; detail: string }> {
+  const webhook = process.env.DISCORD_WEBHOOK_URL?.trim();
+  if (!webhook) {
+    return {
+      status: "skipped",
+      detail: "DISCORD_WEBHOOK_URL missing — email/ping still fire.",
+    };
+  }
+  if (!isDiscordWebhookUrl(webhook)) {
+    return {
+      status: "failed",
+      detail: "DISCORD_WEBHOOK_URL must be a discord.com webhook.",
+    };
+  }
+  const { subject, text } = formatM1Email(plan, snap);
+  try {
+    const response = await fetch(webhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: "Whale Signal Desk",
+        content: `${subject}\n\`\`\`\n${text.slice(0, 1800)}\n\`\`\``,
+      }),
+    });
+    if (!response.ok) {
+      return {
+        status: "failed",
+        detail: `discord ${response.status}`,
+      };
+    }
+    return { status: "sent", detail: "discord webhook posted" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { status: "failed", detail: message.slice(0, 200) };
+  }
+}
+
 export async function applyM1AlertLatch(
   snap: M1Snapshot
 ): Promise<M1Snapshot> {
@@ -123,6 +184,8 @@ export async function applyM1AlertLatch(
   let ping = false;
   let email: EmailStatus = "idle";
   let detail = "";
+  let discord: EmailStatus = "idle";
+  let discordDetail = "";
 
   if (shouldFireM1Alert(snap.signal, snap.candleKey, state.emailedCandle)) {
     ping = true;
@@ -130,9 +193,14 @@ export async function applyM1AlertLatch(
       const result = await sendM1Email(snap.armedPlan, snap);
       email = result.status;
       detail = result.detail;
+      const hook = await sendDiscordAlert(snap.armedPlan, snap);
+      discord = hook.status;
+      discordDetail = hook.detail;
     } else {
       email = "skipped";
       detail = "confluence without a sized plan";
+      discord = "skipped";
+      discordDetail = "confluence without a sized plan";
     }
     state.emailedCandle = snap.candleKey;
   }
@@ -142,6 +210,8 @@ export async function applyM1AlertLatch(
     alertPing: ping,
     emailStatus: email,
     emailDetail: detail,
+    discordStatus: discord,
+    discordDetail: discordDetail,
   };
 }
 

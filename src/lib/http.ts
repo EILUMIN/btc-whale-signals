@@ -48,6 +48,38 @@ export async function fetchJson<T>(
   }
 }
 
+export async function fetchText(
+  url: string,
+  timeoutMs = FETCH_TIMEOUT_MS
+): Promise<string> {
+  const absolute = toAbsoluteUrl(url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(absolute, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "btc-whale-signals/1.0 (local dashboard)",
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new HttpError(
+        `${response.status} ${response.statusText}`,
+        response.status,
+        absolute
+      );
+    }
+    return (await response.text()).trim();
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new HttpError(message, undefined, absolute);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

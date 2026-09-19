@@ -1,6 +1,7 @@
 const MEMPOOL_API_DEFAULT = "https://mempool.space/api";
 const MEMPOOL_EXPLORER_DEFAULT = "https://mempool.space";
 const MEMPOOL_WS_DEFAULT = "wss://mempool.space/api/v1/ws";
+const BLOCKSTREAM_API_DEFAULT = "https://blockstream.info/api";
 
 function firstEnv(...keys: string[]) {
   for (const key of keys) {
@@ -67,6 +68,18 @@ export const MEMPOOL_WS = absoluteOrFallback(
   process.env.MEMPOOL_WS_URL,
   MEMPOOL_WS_DEFAULT
 );
+
+export const BLOCKSTREAM_API = absoluteOrFallback(
+  process.env.BLOCKSTREAM_API_BASE,
+  BLOCKSTREAM_API_DEFAULT
+);
+
+export function esploraBases(): string[] {
+  const bases = [MEMPOOL_API, BLOCKSTREAM_API].map((base) =>
+    base.replace(/\/$/, "")
+  );
+  return [...new Set(bases)];
+}
 
 export function mempoolUrl(path: string) {
   const suffix = path.startsWith("/") ? path : `/${path}`;
