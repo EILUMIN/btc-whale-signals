@@ -44,6 +44,7 @@ import {
   parseKrakenTicker,
 } from "../src/lib/price";
 import {
+  describeDiscordWebhookConfig,
   getDiscordWebhookUrl,
   normalizeDiscordWebhookUrl,
 } from "../src/lib/server-env";
@@ -494,6 +495,16 @@ process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL =
 if (getDiscordWebhookUrl()) {
   throw new Error("NEXT_PUBLIC_DISCORD_WEBHOOK_URL must never be used as the webhook");
 }
+process.env.DISCORD_WEBHOOK_URL =
+  'https://discord.com/api/webhooks/123456789012345678/super-secret-token';
+const probe = describeDiscordWebhookConfig();
+if (!probe.configured || !probe.normalizedValid || probe.hostKind !== "discord") {
+  throw new Error(`webhook probe ${JSON.stringify(probe)}`);
+}
+if (JSON.stringify(probe).includes("super-secret-token")) {
+  throw new Error("webhook probe leaked the secret");
+}
+delete process.env.DISCORD_WEBHOOK_URL;
 delete process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL;
 if (prevPublicWebhook) {
   process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL = prevPublicWebhook;

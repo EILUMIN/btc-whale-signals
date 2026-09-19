@@ -55,6 +55,15 @@ export function normalizeDiscordWebhookUrl(raw: string): string {
       value = value.slice(1, -1).trim();
     }
   }
+  value = value.replace(/\\\//g, "/").replace(/^<|>$/g, "").trim();
+  if (value.startsWith("{") && value.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(value) as { url?: unknown };
+      if (typeof parsed.url === "string") value = parsed.url.trim();
+    } catch {
+      // keep original
+    }
+  }
   if (value.startsWith("http://") && /discord(?:app)?\.com/i.test(value)) {
     value = `https://${value.slice("http://".length)}`;
   }
@@ -71,6 +80,64 @@ export function getDiscordWebhookUrl(): string {
   // Server secret only. Never fall back to NEXT_PUBLIC_DISCORD_WEBHOOK_URL.
   const raw = process.env.DISCORD_WEBHOOK_URL?.trim() ?? "";
   return raw ? normalizeDiscordWebhookUrl(raw) : "";
+}
+
+/** Shape of the server webhook secret. Never returns the URL or token. */
+export function describeDiscordWebhookConfig(): {
+  configured: boolean;
+  length: number;
+  quoted: boolean;
+  startsWithHttp: boolean;
+  mentionsDiscord: boolean;
+  mentionsWebhooks: boolean;
+  parseOk: boolean;
+  protocol: string;
+  hostKind: "discord" | "discordapp" | "other" | "none";
+  pathHasWebhook: boolean;
+  normalizedValid: boolean;
+} {
+  assertServer();
+  const raw = process.env.DISCORD_WEBHOOK_URL ?? "";
+  const trimmed = raw.trim();
+  const normalized = trimmed ? normalizeDiscordWebhookUrl(trimmed) : "";
+  let protocol = "";
+  let host = "";
+  let path = "";
+  let parseOk = false;
+  try {
+    const url = new URL(normalized);
+    protocol = url.protocol.replace(":", "");
+    host = url.hostname.toLowerCase();
+    path = url.pathname.toLowerCase();
+    parseOk = true;
+  } catch {
+    parseOk = false;
+  }
+  const hostKind =
+    host === "discord.com" || host.endsWith(".discord.com")
+      ? "discord"
+      : host === "discordapp.com" || host.endsWith(".discordapp.com")
+        ? "discordapp"
+        : host
+          ? "other"
+          : "none";
+  return {
+    configured: Boolean(trimmed),
+    length: trimmed.length,
+    quoted: trimmed.startsWith('"') || trimmed.startsWith("'"),
+    startsWithHttp: /^https?:\/\//i.test(trimmed),
+    mentionsDiscord: /discord/i.test(trimmed),
+    mentionsWebhooks: /webhooks/i.test(trimmed),
+    parseOk,
+    protocol,
+    hostKind,
+    pathHasWebhook: path.includes("webhook"),
+    normalizedValid:
+      parseOk &&
+      protocol === "https" &&
+      (hostKind === "discord" || hostKind === "discordapp") &&
+      (path.includes("/api/webhooks/") || /\/api\/v\d+\/webhooks\//.test(path)),
+  };
 }
 
 export function getEmailAuth(): {

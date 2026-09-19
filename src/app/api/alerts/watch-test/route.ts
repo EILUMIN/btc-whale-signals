@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { candleKeyUnix, emptyOnchainFlow } from "@/lib/m1";
 import { fetchLivePrice } from "@/lib/price";
 import { applyM1AlertLatch } from "@/lib/signal-alert";
+import { describeDiscordWebhookConfig } from "@/lib/server-env";
 import {
   readWatchTestToken,
   watchTestTokenAuthorized,
@@ -87,11 +88,28 @@ export async function POST(request: Request) {
       discordStatus: snap.discordStatus,
       discordDetail: snap.discordDetail,
       emailStatus: snap.emailStatus,
+      webhook:
+        snap.discordStatus === "sent"
+          ? undefined
+          : describeDiscordWebhookConfig(),
     },
     { headers: { "Cache-Control": "no-store" } }
   );
 }
 
-export function GET() {
-  return deny(405, "POST only");
+export function GET(request: Request) {
+  if (!watchTestTokenAuthorized(readWatchTestToken(request))) {
+    return deny(405, "POST only");
+  }
+  const probe = describeDiscordWebhookConfig();
+  return NextResponse.json(
+    {
+      ok: true,
+      signal: "WATCH",
+      mode: "probe",
+      sent: false,
+      webhook: probe,
+    },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
