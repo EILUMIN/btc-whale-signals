@@ -504,6 +504,11 @@ if (!probe.configured || !probe.normalizedValid || probe.hostKind !== "discord")
 if (JSON.stringify(probe).includes("super-secret-token")) {
   throw new Error("webhook probe leaked the secret");
 }
+process.env.DISCORD_WEBHOOK_URL = "https://discord.gg/abcdefghij";
+const inviteProbe = describeDiscordWebhookConfig();
+if (inviteProbe.hostKind !== "invite" || inviteProbe.normalizedValid) {
+  throw new Error(`invite probe ${JSON.stringify(inviteProbe)}`);
+}
 delete process.env.DISCORD_WEBHOOK_URL;
 delete process.env.NEXT_PUBLIC_DISCORD_WEBHOOK_URL;
 if (prevPublicWebhook) {

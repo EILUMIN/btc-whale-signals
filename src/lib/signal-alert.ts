@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import type { M1Snapshot, M1Signal, RiskPlan } from "@/lib/m1";
 import {
+  describeDiscordWebhookConfig,
   getDiscordWebhookUrl,
   getEmailAuth,
 } from "@/lib/server-env";
@@ -193,9 +194,15 @@ export async function postDiscord(
     };
   }
   if (!isDiscordWebhookUrl(webhook)) {
+    const shape = describeDiscordWebhookConfig();
+    const detail =
+      shape.hostKind === "invite" ||
+      (shape.mentionsDiscord && !shape.mentionsWebhooks)
+        ? "DISCORD_WEBHOOK_URL is a Discord link, not an incoming webhook."
+        : "DISCORD_WEBHOOK_URL must be a discord.com webhook.";
     return {
       status: "failed",
-      detail: "DISCORD_WEBHOOK_URL must be a discord.com webhook.",
+      detail,
     };
   }
   try {

@@ -6,6 +6,8 @@ The desk watches **every labeled exchange cluster** in this repo (Binance, Coinb
 
 `DISCORD_WEBHOOK_URL` and Gmail SMTP live in **server-side `.env` / Vercel env only** (never `NEXT_PUBLIC_`). Production Discord posts from the Node runtime using that server secret. The dashboard never receives the webhook URL.
 
+The value must be a Discord **Incoming Webhook** (`https://discord.com/api/webhooks/…`). A `discord.gg` invite or channel link cannot send alerts.
+
 To send one **WATCH** test through the same one-alert-per-M1-candle latch (never BUY/SELL):
 
 ```bash

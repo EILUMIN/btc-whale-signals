@@ -92,7 +92,7 @@ export function describeDiscordWebhookConfig(): {
   mentionsWebhooks: boolean;
   parseOk: boolean;
   protocol: string;
-  hostKind: "discord" | "discordapp" | "other" | "none";
+  hostKind: "discord" | "discordapp" | "invite" | "other" | "none";
   pathHasWebhook: boolean;
   normalizedValid: boolean;
 } {
@@ -114,10 +114,14 @@ export function describeDiscordWebhookConfig(): {
     parseOk = false;
   }
   const hostKind =
-    host === "discord.com" || host.endsWith(".discord.com")
-      ? "discord"
-      : host === "discordapp.com" || host.endsWith(".discordapp.com")
-        ? "discordapp"
+    host === "discord.gg" ||
+    host.endsWith(".discord.gg") ||
+    path.startsWith("/invite/")
+      ? "invite"
+      : host === "discord.com" || host.endsWith(".discord.com")
+        ? "discord"
+        : host === "discordapp.com" || host.endsWith(".discordapp.com")
+          ? "discordapp"
         : host
           ? "other"
           : "none";
