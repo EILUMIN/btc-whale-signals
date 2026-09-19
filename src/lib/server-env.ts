@@ -33,10 +33,44 @@ export function loadServerEnv(root = process.cwd()) {
   }
 }
 
+const DISCORD_WEBHOOK_RE =
+  /https:\/\/(?:[a-z0-9-]+\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/[A-Za-z0-9_.-]+/i;
+
+/** Strip quotes, key prefixes, and curl wrapping Vercel sometimes stores. */
+export function normalizeDiscordWebhookUrl(raw: string): string {
+  let value = raw.replace(/[\u0000-\u001F\u007F\u200B-\u200D\uFEFF]/g, "").trim();
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'")) ||
+    (value.startsWith("`") && value.endsWith("`"))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+  if (/^DISCORD_WEBHOOK_URL=/i.test(value)) {
+    value = value.replace(/^DISCORD_WEBHOOK_URL=/i, "").trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1).trim();
+    }
+  }
+  if (value.startsWith("http://") && /discord(?:app)?\.com/i.test(value)) {
+    value = `https://${value.slice("http://".length)}`;
+  }
+  const match = value.match(DISCORD_WEBHOOK_RE);
+  if (match) return match[0];
+  if (/^\d{5,}\/[A-Za-z0-9_.-]+$/.test(value)) {
+    return `https://discord.com/api/webhooks/${value}`;
+  }
+  return value;
+}
+
 export function getDiscordWebhookUrl(): string {
   assertServer();
   // Server secret only. Never fall back to NEXT_PUBLIC_DISCORD_WEBHOOK_URL.
-  return process.env.DISCORD_WEBHOOK_URL?.trim() ?? "";
+  const raw = process.env.DISCORD_WEBHOOK_URL?.trim() ?? "";
+  return raw ? normalizeDiscordWebhookUrl(raw) : "";
 }
 
 export function getEmailAuth(): {

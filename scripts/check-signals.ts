@@ -43,7 +43,10 @@ import {
   parseCoinbaseTicker,
   parseKrakenTicker,
 } from "../src/lib/price";
-import { getDiscordWebhookUrl } from "../src/lib/server-env";
+import {
+  getDiscordWebhookUrl,
+  normalizeDiscordWebhookUrl,
+} from "../src/lib/server-env";
 import {
   sha256Hex,
   watchTestTokenAuthorized,
@@ -430,8 +433,32 @@ if (estimateArrival(1, {
 if (!isDiscordWebhookUrl("https://discord.com/api/webhooks/1/abc")) {
   throw new Error("valid discord webhook rejected");
 }
+if (!isDiscordWebhookUrl("https://discord.com/api/v10/webhooks/1/abc")) {
+  throw new Error("discord v10 webhook path must be accepted");
+}
 if (isDiscordWebhookUrl("https://example.com/api/webhooks/1/abc")) {
   throw new Error("non-discord webhook must be rejected");
+}
+const quoted =
+  '"https://discord.com/api/webhooks/123456789012345678/token-value"';
+if (
+  normalizeDiscordWebhookUrl(quoted) !==
+  "https://discord.com/api/webhooks/123456789012345678/token-value"
+) {
+  throw new Error("quoted Vercel webhook must be normalized");
+}
+if (
+  normalizeDiscordWebhookUrl(
+    "curl -X POST https://ptb.discord.com/api/v9/webhooks/123456789012345678/token_value"
+  ) !== "https://ptb.discord.com/api/v9/webhooks/123456789012345678/token_value"
+) {
+  throw new Error("curl-wrapped discord webhook must be extracted");
+}
+if (
+  normalizeDiscordWebhookUrl("123456789012345678/token_value") !==
+  "https://discord.com/api/webhooks/123456789012345678/token_value"
+) {
+  throw new Error("id/token Vercel value must resolve to the existing webhook");
 }
 
 if (shouldFireM1Alert("WAIT", 100, null)) {

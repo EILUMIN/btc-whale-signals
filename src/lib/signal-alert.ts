@@ -173,7 +173,10 @@ export function isDiscordWebhookUrl(value: string): boolean {
       host === "discordapp.com" ||
       host.endsWith(".discord.com") ||
       host.endsWith(".discordapp.com");
-    return discordHost && url.pathname.includes("/api/webhooks/");
+    const path = url.pathname.toLowerCase();
+    const webhookPath =
+      path.includes("/api/webhooks/") || /\/api\/v\d+\/webhooks\//.test(path);
+    return discordHost && webhookPath && url.protocol === "https:";
   } catch {
     return false;
   }
