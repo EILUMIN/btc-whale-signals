@@ -80,7 +80,17 @@ function futures(partial: Partial<FuturesSnapshot> = {}): FuturesSnapshot {
     takerBuyDominant: true,
     longLiquidations: 1_000_000,
     shortLiquidations: 800_000,
+    basis: 24,
     basisPct: 0.0003,
+    basisSource: "okx · BTC-USDT-SWAP vs BTC-USDT (index)",
+    basisReason: null,
+    basisTimestamp: new Date().toISOString(),
+    basisStale: false,
+    basisAvailable: true,
+    basisStatus: "fresh",
+    spotIndexPrice: 80_076,
+    futuresInstrument: "BTC-USDT-SWAP",
+    spotInstrument: "BTC-USDT",
     metrics: [],
     waitReason: null,
     ...partial,
@@ -308,6 +318,53 @@ const short = decidePrecisionSetup({
 });
 if (short.direction !== "SHORT" || !short.plan) {
   throw new Error(`expected SHORT got ${short.direction} ${short.waitReason}`);
+}
+
+const missingBasis = decidePrecisionSetup({
+  live: px,
+  vwap: px - 40,
+  cvd: 18,
+  bars,
+  bidWalls: [wall("bid", px - 15, 560)],
+  askWalls: [wall("ask", px + 80, 90)],
+  flow: {
+    ...emptyOnchainFlow(),
+    prints: [print("outflow", 520, true)],
+    outflows: 520,
+    confirmedBtc: 520,
+  },
+  futures: futures({
+    basis: null,
+    basisPct: null,
+    basisAvailable: false,
+    basisStale: false,
+    basisStatus: "unavailable",
+    basisSource: null,
+    basisReason: "missing spot/index price",
+    basisTimestamp: null,
+    spotIndexPrice: null,
+  }),
+  priceTimestamp: new Date().toISOString(),
+  spoofChecked: true,
+  spoofCleared: true,
+  venuesOk: 3,
+  settings,
+  nowMs: Date.now(),
+});
+if (missingBasis.direction !== "LONG" || !missingBasis.plan) {
+  throw new Error(
+    `missing optional basis must not block LONG, got ${missingBasis.direction} ${missingBasis.waitReason}`
+  );
+}
+if (
+  !missingBasis.plan.reason.includes(
+    "BASIS UNAVAILABLE — optional confirmation missing."
+  )
+) {
+  throw new Error("LONG must show BASIS UNAVAILABLE note");
+}
+if (missingBasis.dataStale) {
+  throw new Error("optional basis gap must not mark the signal stale");
 }
 
 const tinyStop = buildPrecisionPlan({

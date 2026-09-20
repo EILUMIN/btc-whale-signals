@@ -1,3 +1,4 @@
+import { basisOptionalNote, formatBasisDisplay } from "@/lib/basis";
 import { roundPrice } from "@/lib/price";
 import { PRICE_STALE_SEC, isStale } from "@/lib/format";
 import type { FuturesSnapshot } from "@/lib/futures";
@@ -422,6 +423,19 @@ export function decidePrecisionSetup(input: {
       : "confirmed flow does not oppose",
     "fresh spot + futures",
   ];
+  const basisNote = basisOptionalNote(input.futures);
+  if (basisNote) {
+    reasons.push(basisNote);
+    confirmations.push(basisNote);
+  } else if (
+    input.futures.basis !== null &&
+    input.futures.basisPct !== null &&
+    input.futures.basisSource
+  ) {
+    reasons.push(
+      `basis ${formatBasisDisplay(input.futures.basis, input.futures.basisPct)} from ${input.futures.basisSource}`
+    );
+  }
 
   const plan = buildPrecisionPlan({
     direction,

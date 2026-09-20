@@ -1,3 +1,15 @@
+import {
+  BINANCE_USDT_PERP,
+  OKX_FUTURES_INSTRUMENT,
+  OKX_INDEX_INSTRUMENT,
+  OKX_SPOT_INSTRUMENT,
+  computeBasis,
+  emptyBasisResult,
+  formatBasisDisplay,
+  type BasisQuote,
+  type BasisResult,
+  type BasisStatus,
+} from "@/lib/basis";
 import { fetchJson } from "@/lib/http";
 import { isStale } from "@/lib/format";
 import { loadRiskSettings } from "@/lib/risk-settings";
@@ -13,6 +25,9 @@ export type FuturesMetric = {
   stale: boolean;
   missing: boolean;
   tone: MetricTone;
+  optional?: boolean;
+  reason?: string | null;
+  status?: BasisStatus;
 };
 
 export type FuturesSnapshot = {
@@ -34,7 +49,17 @@ export type FuturesSnapshot = {
   takerBuyDominant: boolean | null;
   longLiquidations: number | null;
   shortLiquidations: number | null;
+  basis: number | null;
   basisPct: number | null;
+  basisSource: string | null;
+  basisReason: string | null;
+  basisTimestamp: string | null;
+  basisStale: boolean;
+  basisAvailable: boolean;
+  basisStatus: BasisStatus;
+  spotIndexPrice: number | null;
+  futuresInstrument: string | null;
+  spotInstrument: string | null;
   metrics: FuturesMetric[];
   waitReason: string | null;
 };
@@ -129,8 +154,10 @@ type BybitOi = {
   result?: { list?: Array<{ openInterest?: string; timestamp?: string | number }> };
 };
 type OkxBox<T> = { data?: T[] };
-type OkxTicker = { last?: string; volCcy24h?: string };
-type OkxOi = { oi?: string; oiCcy?: string };
+type OkxTicker = { instId?: string; last?: string; volCcy24h?: string; ts?: string };
+type OkxIndex = { instId?: string; idxPx?: string; ts?: string };
+type OkxMark = { instId?: string; markPx?: string; ts?: string };
+type OkxOi = { oi?: string; oiCcy?: string; ts?: string };
 type OkxFund = { fundingRate?: string };
 type OkxLiq = { bkPx?: string; sz?: string; side?: string; instId?: string };
 
@@ -180,13 +207,22 @@ async function bybitCore() {
 
 async function okxCore() {
   const ticker = await tryJson<OkxBox<OkxTicker>>([
-    "https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT-SWAP",
+    `https://www.okx.com/api/v5/market/ticker?instId=${OKX_FUTURES_INSTRUMENT}`,
+  ]);
+  const spot = await tryJson<OkxBox<OkxTicker>>([
+    `https://www.okx.com/api/v5/market/ticker?instId=${OKX_SPOT_INSTRUMENT}`,
+  ]);
+  const index = await tryJson<OkxBox<OkxIndex>>([
+    `https://www.okx.com/api/v5/market/index-tickers?instId=${OKX_INDEX_INSTRUMENT}`,
+  ]);
+  const mark = await tryJson<OkxBox<OkxMark>>([
+    `https://www.okx.com/api/v5/public/mark-price?instId=${OKX_FUTURES_INSTRUMENT}`,
   ]);
   const oi = await tryJson<OkxBox<OkxOi>>([
-    "https://www.okx.com/api/v5/public/open-interest?instId=BTC-USDT-SWAP",
+    `https://www.okx.com/api/v5/public/open-interest?instId=${OKX_FUTURES_INSTRUMENT}`,
   ]);
   const fund = await tryJson<OkxBox<OkxFund>>([
-    "https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP",
+    `https://www.okx.com/api/v5/public/funding-rate?instId=${OKX_FUTURES_INSTRUMENT}`,
   ]);
   const liq = await tryJson<OkxBox<OkxLiq>>([
     "https://www.okx.com/api/v5/public/liquidation-orders?instType=SWAP&uly=BTC-USDT&state=filled&limit=50",
@@ -202,7 +238,7 @@ async function okxCore() {
   }>([
     "https://api.bitget.com/api/v2/mix/market/taker-buy-sell?symbol=BTCUSDT&period=5m",
   ]);
-  return { ticker, oi, fund, liq, ratio, taker, bitgetTaker };
+  return { ticker, spot, index, mark, oi, fund, liq, ratio, taker, bitgetTaker };
 }
 
 function n(v: unknown): number | null {
@@ -210,8 +246,74 @@ function n(v: unknown): number | null {
   return Number.isFinite(x) ? x : null;
 }
 
+function okxIso(ts?: string | number | null): string | null {
+  if (ts === null || ts === undefined || ts === "") return null;
+  const x = Number(ts);
+  if (!Number.isFinite(x) || x <= 0) return null;
+  return new Date(x).toISOString();
+}
+
+function quote(
+  venue: string,
+  instrument: string,
+  price: number | null,
+  timestamp: string | null,
+  kind: BasisQuote["kind"]
+): BasisQuote | null {
+  if (price === null && !timestamp) return null;
+  return { venue, instrument, price, timestamp, kind };
+}
+
+function basisFields(result: BasisResult) {
+  return {
+    basis: result.basis,
+    basisPct: result.basisPct,
+    basisSource: result.source,
+    basisReason: result.reason,
+    basisTimestamp: result.timestamp,
+    basisStale: result.stale,
+    basisAvailable: result.available,
+    basisStatus: result.status,
+    spotIndexPrice: result.spotIndexPrice,
+    futuresInstrument: result.futuresInstrument,
+    spotInstrument: result.spotInstrument,
+  };
+}
+
+function basisMetric(result: BasisResult): FuturesMetric {
+  if (!result.available || result.basis === null || result.basisPct === null) {
+    return {
+      label: "Basis / premium",
+      value: null,
+      display: `UNAVAILABLE — ${result.reason ?? "source missing"}`,
+      source: result.source ?? "none",
+      timestamp: result.timestamp,
+      stale: false,
+      missing: true,
+      optional: true,
+      reason: result.reason,
+      tone: "wait",
+      status: "unavailable",
+    };
+  }
+  return {
+    label: "Basis / premium",
+    value: result.basisPct,
+    display: formatBasisDisplay(result.basis, result.basisPct),
+    source: result.source ?? "none",
+    timestamp: result.timestamp,
+    stale: result.stale,
+    missing: false,
+    optional: true,
+    reason: null,
+    tone: result.basis > 0 ? "long" : result.basis < 0 ? "short" : "wait",
+    status: result.status,
+  };
+}
+
 export function emptyFutures(reason: string): FuturesSnapshot {
   const ts = isoNow();
+  const unavailable = emptyBasisResult("source missing");
   return {
     ok: false,
     stale: true,
@@ -231,7 +333,7 @@ export function emptyFutures(reason: string): FuturesSnapshot {
     takerBuyDominant: null,
     longLiquidations: null,
     shortLiquidations: null,
-    basisPct: null,
+    ...basisFields(unavailable),
     metrics: [],
     waitReason: reason,
   };
@@ -246,15 +348,23 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
   ]);
   const sources: string[] = [];
   const now = isoNow();
+  const nowMs = Date.now();
 
-  const mark = n(binance.premium?.data.markPrice);
-  const index = n(binance.premium?.data.indexPrice);
+  const binanceMark = n(binance.premium?.data.markPrice);
+  const binanceIndex = n(binance.premium?.data.indexPrice);
   const bybitLast = n(bybit.tickers?.data.result?.list?.[0]?.lastPrice);
-  const okxLast = n(okx.ticker?.data.data?.[0]?.last);
-  const futuresPrice = mark ?? bybitLast ?? okxLast;
-  if (binance.premium) sources.push("binance-fapi");
+  const okxSwap = okx.ticker?.data.data?.[0];
+  const okxIndexRow = okx.index?.data.data?.[0];
+  const okxSpotRow = okx.spot?.data.data?.[0];
+  const okxMarkRow = okx.mark?.data.data?.[0];
+  const okxLast = n(okxSwap?.last);
+  const okxMarkPx = n(okxMarkRow?.markPx);
+  const okxFuturesPx = okxLast ?? okxMarkPx;
+  // Same-venue first: do not mix OKX futures with Binance index, or the reverse.
+  const futuresPrice = okxFuturesPx ?? binanceMark ?? bybitLast;
+  if (okx.ticker || okx.mark) sources.push("okx");
+  else if (binance.premium) sources.push("binance-fapi");
   else if (bybit.tickers) sources.push("bybit");
-  else if (okx.ticker) sources.push("okx");
 
   const funding =
     n(binance.premium?.data.lastFundingRate) ??
@@ -342,11 +452,64 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
     sources.push("okx-liq");
   }
 
-  const basisPct =
-    mark !== null && index !== null && index > 0 ? (mark - index) / index : null;
-  const premiumTs = binance.premium?.data.time
+  const okxFuturesQuote = quote(
+    "okx",
+    okxSwap?.instId ?? okxMarkRow?.instId ?? OKX_FUTURES_INSTRUMENT,
+    okxFuturesPx,
+    okxIso(okxSwap?.ts) ?? okxIso(okxMarkRow?.ts),
+    "futures"
+  );
+  const okxIndexQuote = quote(
+    "okx",
+    okxIndexRow?.instId ?? OKX_INDEX_INSTRUMENT,
+    n(okxIndexRow?.idxPx),
+    okxIso(okxIndexRow?.ts),
+    "index"
+  );
+  const okxSpotQuote = quote(
+    "okx",
+    okxSpotRow?.instId ?? OKX_SPOT_INSTRUMENT,
+    n(okxSpotRow?.last),
+    okxIso(okxSpotRow?.ts),
+    "spot"
+  );
+  let basisResult = computeBasis({
+    futures: okxFuturesQuote,
+    index: okxIndexQuote,
+    spot: okxSpotQuote,
+    nowMs,
+    staleLimitSec: staleLimit,
+  });
+  const binancePremiumTs = binance.premium?.data.time
     ? new Date(binance.premium.data.time).toISOString()
-    : now;
+    : null;
+  if (!basisResult.available) {
+    const binancePair = computeBasis({
+      futures: quote(
+        "binance",
+        BINANCE_USDT_PERP,
+        binanceMark,
+        binancePremiumTs,
+        "futures"
+      ),
+      index: quote(
+        "binance",
+        BINANCE_USDT_PERP,
+        binanceIndex,
+        binancePremiumTs,
+        "index"
+      ),
+      nowMs,
+      staleLimitSec: staleLimit,
+    });
+    if (binancePair.available) basisResult = binancePair;
+  }
+  if (basisResult.available && basisResult.source) {
+    sources.push(basisResult.source.startsWith("okx") ? "okx-basis" : "binance-basis");
+  }
+
+  const okxPriceTs = okxIso(okxSwap?.ts) ?? okxIso(okxMarkRow?.ts);
+  const premiumTs = okxPriceTs ?? binancePremiumTs ?? now;
   const lsTs = binance.ls?.data.at(-1)?.timestamp
     ? new Date(Number(binance.ls.data.at(-1)?.timestamp)).toISOString()
     : now;
@@ -355,8 +518,10 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
     : now;
   const oiTs = binance.oiHist?.data.at(-1)?.timestamp
     ? new Date(Number(binance.oiHist.data.at(-1)?.timestamp)).toISOString()
-    : now;
+    : okxIso(okx.oi?.data.data?.[0]?.ts) ?? now;
 
+  // Mandatory signal data: futures price, OI, funding, taker flow, freshness.
+  // Basis/premium is optional confirmation and never sets missingCore.
   const missingCore =
     futuresPrice === null ||
     oiNow === null ||
@@ -455,19 +620,7 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
       staleLimit,
       "long"
     ),
-    metric(
-      "Basis / premium",
-      basisPct,
-      basisPct !== null ? pct(basisPct, 3) : "—",
-      binance.premium ? "binance-fapi" : "none",
-      premiumTs,
-      staleLimit,
-      basisPct !== null && basisPct > 0
-        ? "long"
-        : basisPct !== null && basisPct < 0
-          ? "short"
-          : "wait"
-    ),
+    basisMetric(basisResult),
   ];
 
   let waitReason: string | null = null;
@@ -496,7 +649,7 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
     takerBuyDominant,
     longLiquidations: longLiq,
     shortLiquidations: shortLiq,
-    basisPct,
+    ...basisFields(basisResult),
     metrics,
     waitReason,
   };

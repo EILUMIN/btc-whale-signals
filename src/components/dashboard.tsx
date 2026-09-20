@@ -986,9 +986,16 @@ function FuturesPanel({
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   {row.source}
+                  {row.optional ? ` · ${t.optionalConfirm}` : ""}
                   {row.timestamp ? ` · ${formatIsoUtc(row.timestamp)}` : ""}
-                  {age !== null ? ` · ${age}s` : ""}
-                  {row.stale || row.missing ? ` · ${t.dataStale}` : ""}
+                  {age !== null ? ` · ${t.dataAge.replace("{n}", String(age))}` : ""}
+                  {row.status === "unavailable"
+                    ? ""
+                    : row.status === "fresh"
+                      ? ` · ${t.dataFresh}`
+                      : row.status === "stale" || row.stale || row.missing
+                        ? ` · ${t.dataStale}`
+                        : ""}
                 </p>
               </div>
             );

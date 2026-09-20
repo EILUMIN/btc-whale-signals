@@ -125,7 +125,10 @@ export const dictionaries = {
     shortHint: "Selling CVD + taker sell + rising OI + ask wall + fresh data",
     whaleTape: "Whale tape",
     futuresTitle: "Futures confluence",
-    futuresHint: "Public futures only. Stale or missing core data forces WAIT.",
+    futuresHint:
+      "Public futures only. Missing or stale mandatory data (price, CVD/taker, open interest, wall confirmation, freshness) forces WAIT. Basis/premium is optional confirmation.",
+    dataFresh: "FRESH",
+    optionalConfirm: "optional",
     tradePlanTitle: "Trade plan",
     paperBadge: "PAPER TRADING",
     paperHint:
@@ -150,7 +153,7 @@ export const dictionaries = {
     falseSignals: "False signals",
     blockedSignals: "Blocked by safety rules",
     precisionExplain:
-      "LONG and SHORT need executed order flow, CVD, a holding wall, rising open interest with price, fresh futures, anti-spoof, and acceptable R:R. Confirmed on-chain flow only supports or vetoes. Pending mempool never entries. WAIT is the default.",
+      "LONG and SHORT need executed order flow, CVD, a holding wall, rising open interest with price, fresh futures, anti-spoof, and acceptable R:R. Basis/premium is optional confirmation and never blocks a setup by itself. Confirmed on-chain flow only supports or vetoes. Pending mempool never entries. WAIT is the default.",
   },
   fil: {
     htmlLang: "fil",
@@ -275,7 +278,9 @@ export const dictionaries = {
     whaleTape: "Whale tape",
     futuresTitle: "Futures confluence",
     futuresHint:
-      "Public futures lang. Kapag stale o kulang ang core data, WAIT.",
+      "Public futures lang. Kapag stale o kulang ang mandatory data (presyo, CVD/taker, open interest, wall, freshness), WAIT. Optional confirmation lang ang basis/premium.",
+    dataFresh: "FRESH",
+    optionalConfirm: "optional",
     tradePlanTitle: "Trade plan",
     paperBadge: "PAPER TRADING",
     paperHint:
@@ -300,7 +305,7 @@ export const dictionaries = {
     falseSignals: "False signals",
     blockedSignals: "Hinarang ng safety rules",
     precisionExplain:
-      "Kailangan ng LONG/SHORT: executed order flow, CVD, holding wall, rising OI kasama ang presyo, fresh futures, anti-spoof, at sapat na R:R. Confirmed on-chain lang ang support o veto. Pending mempool hindi entry. WAIT ang default.",
+      "Kailangan ng LONG/SHORT: executed order flow, CVD, holding wall, rising OI kasama ang presyo, fresh futures, anti-spoof, at sapat na R:R. Optional confirmation lang ang basis/premium — hindi nito hina-block ang setup mag-isa. Confirmed on-chain lang ang support o veto. Pending mempool hindi entry. WAIT ang default.",
   },
 } as const;
 
