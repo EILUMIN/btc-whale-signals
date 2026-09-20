@@ -267,9 +267,24 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
     n(bybit.tickers?.data.result?.list?.[0]?.openInterest) ??
     n(bybit.oi?.data.result?.list?.[0]?.openInterest) ??
     n(okx.oi?.data.data?.[0]?.oiCcy);
-  const oiPrev =
-    n(binance.oiHist?.data.at(-2)?.sumOpenInterest) ??
+  let oiPrev =
+    n(binance.oiHist?.data.at(-1) && binance.oiHist.data.length > 1
+      ? binance.oiHist.data.at(-2)?.sumOpenInterest
+      : undefined) ??
     n(bybit.oi?.data.result?.list?.[1]?.openInterest);
+  const oiMem = globalThis as unknown as {
+    __btcOiPrev?: { at: number; oi: number };
+  };
+  if (oiNow !== null) {
+    if (
+      oiPrev === null &&
+      oiMem.__btcOiPrev &&
+      Date.now() - oiMem.__btcOiPrev.at < 30 * 60_000
+    ) {
+      oiPrev = oiMem.__btcOiPrev.oi;
+    }
+    oiMem.__btcOiPrev = { at: Date.now(), oi: oiNow };
+  }
   const oiRising =
     oiNow !== null && oiPrev !== null ? oiNow > oiPrev : null;
 
