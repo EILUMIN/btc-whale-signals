@@ -191,13 +191,18 @@ async function okxCore() {
   const liq = await tryJson<OkxBox<OkxLiq>>([
     "https://www.okx.com/api/v5/public/liquidation-orders?instType=SWAP&uly=BTC-USDT&state=filled&limit=50",
   ]);
-  const ratio = await tryJson<OkxBox<{ ratio?: string; ts?: string }>>([
+  const ratio = await tryJson<OkxBox<[string, string]>>([
     "https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=BTC&period=5m",
   ]);
-  const taker = await tryJson<OkxBox<{ buyVol?: string; sellVol?: string; ts?: string }>>([
-    "https://www.okx.com/api/v5/rubik/stat/taker-volume?ccy=BTC&instType=CONTRACT&period=5m",
+  const taker = await tryJson<OkxBox<[string, string, string]>>([
+    "https://www.okx.com/api/v5/rubik/stat/taker-volume?ccy=BTC&instType=CONTRACTS&period=5m",
   ]);
-  return { ticker, oi, fund, liq, ratio, taker };
+  const bitgetTaker = await tryJson<{
+    data?: Array<{ buyVolume?: string; sellVolume?: string }>;
+  }>([
+    "https://api.bitget.com/api/v2/mix/market/taker-buy-sell?symbol=BTCUSDT&period=5m",
+  ]);
+  return { ticker, oi, fund, liq, ratio, taker, bitgetTaker };
 }
 
 function n(v: unknown): number | null {
@@ -275,12 +280,15 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
 
   const ls =
     n(binance.ls?.data.at(-1)?.longShortRatio) ??
-    n(okx.ratio?.data.data?.[0]?.ratio);
+    n(okx.ratio?.data.data?.[0]?.[1]);
   const takerBuy =
-    n(binance.taker?.data.at(-1)?.buyVol) ?? n(okx.taker?.data.data?.[0]?.buyVol);
+    n(binance.taker?.data.at(-1)?.buyVol) ??
+    n(okx.taker?.data.data?.[0]?.[2]) ??
+    n(okx.bitgetTaker?.data.data?.at(-1)?.buyVolume);
   const takerSell =
     n(binance.taker?.data.at(-1)?.sellVol) ??
-    n(okx.taker?.data.data?.[0]?.sellVol);
+    n(okx.taker?.data.data?.[0]?.[1]) ??
+    n(okx.bitgetTaker?.data.data?.at(-1)?.sellVolume);
   const takerRatio = n(binance.taker?.data.at(-1)?.buySellRatio);
   const takerBuyDominant =
     takerBuy !== null && takerSell !== null
@@ -288,6 +296,9 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
       : takerRatio !== null
         ? takerRatio > 1
         : null;
+  if (okx.ticker) sources.push("okx");
+  if (okx.taker) sources.push("okx-taker");
+  if (okx.bitgetTaker) sources.push("bitget");
 
   let longLiq: number | null = null;
   let shortLiq: number | null = null;
@@ -397,7 +408,7 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
       "Taker buy volume",
       takerBuy,
       takerBuy !== null ? takerBuy.toFixed(2) : "—",
-      binance.taker ? "binance-fapi" : okx.taker ? "okx" : "none",
+      binance.taker ? "binance-fapi" : okx.taker ? "okx" : okx.bitgetTaker ? "bitget" : "none",
       takerTs,
       staleLimit,
       takerBuyDominant === true ? "long" : "wait"
@@ -406,7 +417,7 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
       "Taker sell volume",
       takerSell,
       takerSell !== null ? takerSell.toFixed(2) : "—",
-      binance.taker ? "binance-fapi" : okx.taker ? "okx" : "none",
+      binance.taker ? "binance-fapi" : okx.taker ? "okx" : okx.bitgetTaker ? "bitget" : "none",
       takerTs,
       staleLimit,
       takerBuyDominant === false ? "short" : "wait"
