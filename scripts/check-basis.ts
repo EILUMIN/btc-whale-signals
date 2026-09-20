@@ -27,8 +27,8 @@ function quote(
 
 const now = Date.parse("2026-09-20T12:00:00.000Z");
 
-function assert(cond: unknown, message: string): asserts cond {
-  if (!cond) throw new Error(message);
+function assert(cond: unknown, message: string | null | undefined): asserts cond {
+  if (!cond) throw new Error(message || "assertion failed");
 }
 
 // Valid basis calculation
