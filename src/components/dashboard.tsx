@@ -989,13 +989,18 @@ function FuturesPanel({
                   {row.optional ? ` · ${t.optionalConfirm}` : ""}
                   {row.timestamp ? ` · ${formatIsoUtc(row.timestamp)}` : ""}
                   {age !== null ? ` · ${t.dataAge.replace("{n}", String(age))}` : ""}
+                  {row.detail ? ` · ${row.detail}` : ""}
                   {row.status === "unavailable"
-                    ? ""
+                    ? row.reason && row.reason !== row.detail
+                      ? ` · ${row.reason}`
+                      : ""
                     : row.status === "fresh"
                       ? ` · ${t.dataFresh}`
-                      : row.status === "stale" || row.stale || row.missing
+                      : row.status === "stale" || row.stale
                         ? ` · ${t.dataStale}`
-                        : ""}
+                        : row.missing
+                          ? ` · ${t.dataStale}`
+                          : ""}
                 </p>
               </div>
             );

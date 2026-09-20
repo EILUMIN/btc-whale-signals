@@ -10,8 +10,16 @@ import {
   type BasisResult,
   type BasisStatus,
 } from "@/lib/basis";
-import { fetchJson } from "@/lib/http";
+import { fetchJson, HttpError } from "@/lib/http";
 import { isStale } from "@/lib/format";
+import {
+  OKX_LIQ_SOURCE,
+  emptyLiquidations,
+  parseBinanceForceOrders,
+  parseOkxLiquidations,
+  type LiquidationResult,
+  type OkxLiquidationPayload,
+} from "@/lib/liquidations";
 import { loadRiskSettings } from "@/lib/risk-settings";
 
 export type MetricTone = "long" | "short" | "wait" | "stale";
@@ -28,6 +36,8 @@ export type FuturesMetric = {
   optional?: boolean;
   reason?: string | null;
   status?: BasisStatus;
+  eventCount?: number | null;
+  detail?: string | null;
 };
 
 export type FuturesSnapshot = {
@@ -49,6 +59,16 @@ export type FuturesSnapshot = {
   takerBuyDominant: boolean | null;
   longLiquidations: number | null;
   shortLiquidations: number | null;
+  liqAvailable: boolean;
+  liqStatus: BasisStatus;
+  liqReason: string | null;
+  liqSource: string | null;
+  liqTimestamp: string | null;
+  liqStale: boolean;
+  liqEventCount: number | null;
+  liqLongCount: number | null;
+  liqShortCount: number | null;
+  liqHttpStatus: number | null;
   basis: number | null;
   basisPct: number | null;
   basisSource: string | null;
@@ -159,7 +179,6 @@ type OkxIndex = { instId?: string; idxPx?: string; ts?: string };
 type OkxMark = { instId?: string; markPx?: string; ts?: string };
 type OkxOi = { oi?: string; oiCcy?: string; ts?: string };
 type OkxFund = { fundingRate?: string };
-type OkxLiq = { bkPx?: string; sz?: string; side?: string; instId?: string };
 
 async function binanceCore() {
   const premium = await tryJson<BinancePremium>(
@@ -224,9 +243,6 @@ async function okxCore() {
   const fund = await tryJson<OkxBox<OkxFund>>([
     `https://www.okx.com/api/v5/public/funding-rate?instId=${OKX_FUTURES_INSTRUMENT}`,
   ]);
-  const liq = await tryJson<OkxBox<OkxLiq>>([
-    "https://www.okx.com/api/v5/public/liquidation-orders?instType=SWAP&uly=BTC-USDT&state=filled&limit=50",
-  ]);
   const ratio = await tryJson<OkxBox<[string, string]>>([
     "https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=BTC&period=5m",
   ]);
@@ -238,7 +254,37 @@ async function okxCore() {
   }>([
     "https://api.bitget.com/api/v2/mix/market/taker-buy-sell?symbol=BTCUSDT&period=5m",
   ]);
-  return { ticker, spot, index, mark, oi, fund, liq, ratio, taker, bitgetTaker };
+  return { ticker, spot, index, mark, oi, fund, ratio, taker, bitgetTaker };
+}
+
+async function fetchOkxLiquidationResult(
+  staleLimit: number,
+  nowMs: number
+): Promise<LiquidationResult> {
+  const url =
+    "https://www.okx.com/api/v5/public/liquidation-orders?instType=SWAP&uly=BTC-USDT&state=filled&limit=50";
+  const fetchedAt = new Date(nowMs).toISOString();
+  try {
+    const payload = await fetchJson<OkxLiquidationPayload>(url, {}, 8_000);
+    return parseOkxLiquidations(payload, {
+      fetchedAt,
+      nowMs,
+      staleLimitSec: staleLimit,
+      httpStatus: 200,
+    });
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status ?? null : null;
+    const message = error instanceof Error ? error.message : "request failed";
+    if (status) {
+      return emptyLiquidations(`API error ${status}: ${message}`, {
+        httpStatus: status,
+        source: OKX_LIQ_SOURCE,
+      });
+    }
+    return emptyLiquidations(`request failed: ${message}`, {
+      source: OKX_LIQ_SOURCE,
+    });
+  }
 }
 
 function n(v: unknown): number | null {
@@ -277,6 +323,55 @@ function basisFields(result: BasisResult) {
     spotIndexPrice: result.spotIndexPrice,
     futuresInstrument: result.futuresInstrument,
     spotInstrument: result.spotInstrument,
+  };
+}
+
+function liqFields(result: LiquidationResult) {
+  return {
+    longLiquidations: result.longUsd,
+    shortLiquidations: result.shortUsd,
+    liqAvailable: result.available,
+    liqStatus: result.status,
+    liqReason: result.reason,
+    liqSource: result.source,
+    liqTimestamp: result.timestamp,
+    liqStale: result.stale,
+    liqEventCount: result.eventCount,
+    liqLongCount: result.longCount,
+    liqShortCount: result.shortCount,
+    liqHttpStatus: result.httpStatus,
+  };
+}
+
+function liqMetric(
+  label: "Long liquidations" | "Short liquidations",
+  result: LiquidationResult
+): FuturesMetric {
+  const value =
+    label === "Long liquidations" ? result.longUsd : result.shortUsd;
+  const display =
+    label === "Long liquidations" ? result.displayLong : result.displayShort;
+  return {
+    label,
+    value: result.available && !result.stale ? value : null,
+    display,
+    source: result.source ?? "none",
+    timestamp: result.timestamp,
+    stale: result.stale,
+    missing: !result.available,
+    optional: true,
+    reason: result.reason,
+    tone: result.stale || !result.available
+      ? result.stale
+        ? "stale"
+        : "wait"
+      : label === "Long liquidations"
+        ? "short"
+        : "long",
+    status: result.status,
+    eventCount:
+      label === "Long liquidations" ? result.longCount : result.shortCount,
+    detail: result.detail,
   };
 }
 
@@ -331,8 +426,7 @@ export function emptyFutures(reason: string): FuturesSnapshot {
     takerBuy: null,
     takerSell: null,
     takerBuyDominant: null,
-    longLiquidations: null,
-    shortLiquidations: null,
+    ...liqFields(emptyLiquidations("source missing")),
     ...basisFields(unavailable),
     metrics: [],
     waitReason: reason,
@@ -341,10 +435,11 @@ export function emptyFutures(reason: string): FuturesSnapshot {
 
 export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
   const staleLimit = loadRiskSettings().futuresStaleSec;
-  const [binance, bybit, okx] = await Promise.all([
+  const [binance, bybit, okx, okxLiq] = await Promise.all([
     binanceCore(),
     bybitCore(),
     okxCore(),
+    fetchOkxLiquidationResult(staleLimit, Date.now()),
   ]);
   const sources: string[] = [];
   const now = isoNow();
@@ -425,32 +520,17 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
   if (okx.taker) sources.push("okx-taker");
   if (okx.bitgetTaker) sources.push("bitget");
 
-  let longLiq: number | null = null;
-  let shortLiq: number | null = null;
-  if (binance.force?.data?.length) {
-    longLiq = 0;
-    shortLiq = 0;
-    for (const row of binance.force.data) {
-      const qty = n(row.origQty) ?? 0;
-      const px = n(row.price) ?? 0;
-      const usdVal = qty * px;
-      // SELL force order = long liquidation
-      if (String(row.side).toUpperCase() === "SELL") longLiq += usdVal;
-      else shortLiq += usdVal;
-    }
-    sources.push("binance-force");
-  } else if (okx.liq?.data.data?.length) {
-    longLiq = 0;
-    shortLiq = 0;
-    for (const row of okx.liq.data.data) {
-      const qty = n(row.sz) ?? 0;
-      const px = n(row.bkPx) ?? 0;
-      const usdVal = qty * px;
-      if (String(row.side).toLowerCase() === "sell") longLiq += usdVal;
-      else shortLiq += usdVal;
-    }
-    sources.push("okx-liq");
+  // Optional confirmation only. Never invent $0 when the payload is missing.
+  let liqResult = okxLiq;
+  if (!liqResult.available && binance.force?.data) {
+    const binanceLiq = parseBinanceForceOrders(binance.force.data, {
+      fetchedAt: now,
+      nowMs,
+      staleLimitSec: staleLimit,
+    });
+    if (binanceLiq.available) liqResult = binanceLiq;
   }
+  if (liqResult.source) sources.push(liqResult.source.split(" · ")[0]);
 
   const okxFuturesQuote = quote(
     "okx",
@@ -602,24 +682,8 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
       staleLimit,
       takerBuyDominant === false ? "short" : "wait"
     ),
-    metric(
-      "Long liquidations",
-      longLiq,
-      longLiq !== null ? usd(longLiq) : "—",
-      longLiq !== null ? sources.find((s) => s.includes("liq") || s.includes("force")) ?? "none" : "none",
-      now,
-      staleLimit,
-      "short"
-    ),
-    metric(
-      "Short liquidations",
-      shortLiq,
-      shortLiq !== null ? usd(shortLiq) : "—",
-      shortLiq !== null ? sources.find((s) => s.includes("liq") || s.includes("force")) ?? "none" : "none",
-      now,
-      staleLimit,
-      "long"
-    ),
+    liqMetric("Long liquidations", liqResult),
+    liqMetric("Short liquidations", liqResult),
     basisMetric(basisResult),
   ];
 
@@ -647,8 +711,7 @@ export async function fetchFuturesSnapshot(): Promise<FuturesSnapshot> {
     takerBuy,
     takerSell,
     takerBuyDominant,
-    longLiquidations: longLiq,
-    shortLiquidations: shortLiq,
+    ...liqFields(liqResult),
     ...basisFields(basisResult),
     metrics,
     waitReason,

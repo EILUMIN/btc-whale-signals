@@ -126,7 +126,7 @@ export const dictionaries = {
     whaleTape: "Whale tape",
     futuresTitle: "Futures confluence",
     futuresHint:
-      "Public futures only. Missing or stale mandatory data (price, CVD/taker, open interest, wall confirmation, freshness) forces WAIT. Basis/premium is optional confirmation.",
+      "Public futures only. Missing or stale mandatory data (price, CVD/taker, open interest, wall confirmation, freshness) forces WAIT. Basis/premium and liquidations are optional confirmation.",
     dataFresh: "FRESH",
     optionalConfirm: "optional",
     tradePlanTitle: "Trade plan",
@@ -278,7 +278,7 @@ export const dictionaries = {
     whaleTape: "Whale tape",
     futuresTitle: "Futures confluence",
     futuresHint:
-      "Public futures lang. Kapag stale o kulang ang mandatory data (presyo, CVD/taker, open interest, wall, freshness), WAIT. Optional confirmation lang ang basis/premium.",
+      "Public futures lang. Kapag stale o kulang ang mandatory data (presyo, CVD/taker, open interest, wall, freshness), WAIT. Optional confirmation lang ang basis/premium at liquidations.",
     dataFresh: "FRESH",
     optionalConfirm: "optional",
     tradePlanTitle: "Trade plan",
