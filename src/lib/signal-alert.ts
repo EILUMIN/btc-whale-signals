@@ -29,9 +29,14 @@ function latch(): Latch {
 export function shouldFireM1Alert(
   signal: M1Signal,
   candleKey: number,
-  emailedCandle: number | null
+  emailedCandle: number | null,
+  direction?: "LONG" | "SHORT" | "WAIT"
 ): boolean {
-  if (signal !== "BUY" && signal !== "SELL" && signal !== "WATCH") return false;
+  if (signal === "WATCH") {
+    if (!Number.isFinite(candleKey)) return false;
+    return emailedCandle !== candleKey;
+  }
+  if (direction !== "LONG" && direction !== "SHORT") return false;
   if (!Number.isFinite(candleKey)) return false;
   return emailedCandle !== candleKey;
 }
@@ -235,6 +240,43 @@ export async function sendDiscordAlert(
   return postDiscord(`${subject}\n\`\`\`\n${text.slice(0, 1800)}\n\`\`\``);
 }
 
+export function formatPrecisionAlert(snap: M1Snapshot): {
+  subject: string;
+  text: string;
+} {
+  const plan = snap.tradePlan;
+  const direction = snap.direction === "SHORT" ? "SHORT" : "LONG";
+  const paper = snap.paperTrading ? "[PAPER] " : "";
+  const money = (n: number) =>
+    `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (!plan) {
+    return {
+      subject: `${paper}BTC/USD ${direction}`,
+      text: `${paper}BTC/USD ${direction}\nNo sized plan.`,
+    };
+  }
+  const text = [
+    `${paper}BTC/USD ${direction}`,
+    "",
+    `Entry: ${money(plan.entry)}  (${money(plan.entryLow)}–${money(plan.entryHigh)})`,
+    `Stop-loss: ${money(plan.stop)}`,
+    `TP1: ${money(plan.tp1)}`,
+    `TP2: ${money(plan.tp2)}`,
+    `Risk/reward: 1:${plan.rrTp1.toFixed(2)} (TP1) · 1:${plan.rrTp2.toFixed(2)} (TP2)`,
+    `Position size: ${plan.sizeBtc.toFixed(6)} BTC`,
+    `Maximum risk: ${money(plan.riskUsd)}`,
+    `Signal strength: ${plan.strength}`,
+    `Reason: ${plan.reason}`,
+    `Data timestamp: ${plan.timestamp}`,
+    `Signal expiry: ${plan.expiry}`,
+    `Invalidation: ${plan.invalidation}`,
+    `Leverage: ${plan.leverageHint}`,
+    "",
+    "Not financial advice. Signal-only desk. No live orders.",
+  ].join("\n");
+  return { subject: `${paper}BTC/USD ${direction}`, text };
+}
+
 export async function sendWatchTestChannels(
   snap: M1Snapshot
 ): Promise<{
@@ -259,7 +301,14 @@ export async function applyM1AlertLatch(
   let discord: EmailStatus = "idle";
   let discordDetail = "";
 
-  if (shouldFireM1Alert(snap.signal, snap.candleKey, state.emailedCandle)) {
+  if (
+    shouldFireM1Alert(
+      snap.signal,
+      snap.candleKey,
+      state.emailedCandle,
+      snap.direction
+    )
+  ) {
     ping = true;
     if (snap.signal === "WATCH") {
       const result = await sendWatchTestChannels(snap);
@@ -267,20 +316,23 @@ export async function applyM1AlertLatch(
       detail = result.email.detail;
       discord = result.discord.status;
       discordDetail = result.discord.detail;
-    } else if (snap.armedPlan) {
-      const result = await sendM1Email(snap.armedPlan, snap);
-      email = result.status;
-      detail = result.detail;
-      const hook = await sendDiscordAlert(snap.armedPlan, snap);
+    } else if (
+      (snap.direction === "LONG" || snap.direction === "SHORT") &&
+      snap.tradePlan
+    ) {
+      const { subject, text } = formatPrecisionAlert(snap);
+      const mail = await sendGmail(subject, text);
+      email = mail.status;
+      detail = mail.detail;
+      const hook = await postDiscord(
+        `${subject}\n\`\`\`\n${text.slice(0, 1800)}\n\`\`\``
+      );
       discord = hook.status;
       discordDetail = hook.detail;
     } else {
-      email = "skipped";
-      detail = "confluence without a sized plan";
-      discord = "skipped";
-      discordDetail = "confluence without a sized plan";
+      ping = false;
     }
-    state.emailedCandle = snap.candleKey;
+    if (ping) state.emailedCandle = snap.candleKey;
   }
 
   return {

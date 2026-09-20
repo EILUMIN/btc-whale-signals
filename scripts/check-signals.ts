@@ -229,13 +229,19 @@ const bars = [
 ];
 if (cvdFromBars(bars) !== 0) throw new Error(`cvd ${cvdFromBars(bars)}`);
 
-if (!shouldFireM1Alert("SELL", 100, null)) {
-  throw new Error("first SELL on a candle must fire");
+if (shouldFireM1Alert("SELL", 100, null)) {
+  throw new Error("whale SELL without precision LONG/SHORT must not alert");
 }
-if (!shouldFireM1Alert("BUY", 100, null)) {
-  throw new Error("first BUY on a candle must fire");
+if (shouldFireM1Alert("BUY", 100, null)) {
+  throw new Error("whale BUY without precision LONG/SHORT must not alert");
 }
-if (shouldFireM1Alert("SELL", 100, 100)) {
+if (!shouldFireM1Alert("BUY", 100, null, "LONG")) {
+  throw new Error("first LONG on a candle must fire");
+}
+if (!shouldFireM1Alert("SELL", 100, null, "SHORT")) {
+  throw new Error("first SHORT on a candle must fire");
+}
+if (shouldFireM1Alert("SELL", 100, 100, "SHORT")) {
   throw new Error("duplicate on same M1 candle must not fire");
 }
 if (shouldFireM1Alert("WAIT", 100, null)) {
@@ -247,7 +253,7 @@ if (!shouldFireM1Alert("WATCH", 100, null)) {
 if (shouldFireM1Alert("WATCH", 100, 100)) {
   throw new Error("duplicate WATCH on same M1 candle must not fire");
 }
-if (!shouldFireM1Alert("BUY", 101, 100)) {
+if (!shouldFireM1Alert("BUY", 101, 100, "LONG")) {
   throw new Error("next M1 candle may fire again");
 }
 
@@ -471,8 +477,8 @@ if (!shouldFireM1Alert("WATCH", 100, null)) {
 if (shouldFireM1Alert("WATCH", 100, 100)) {
   throw new Error("duplicate WATCH on the same M1 candle must be blocked");
 }
-if (!shouldFireM1Alert("BUY", 101, 100) || !shouldFireM1Alert("SELL", 102, 100)) {
-  throw new Error("BUY/SELL confluence alerts must still fire on a new candle");
+if (!shouldFireM1Alert("BUY", 101, 100, "LONG") || !shouldFireM1Alert("SELL", 102, 100, "SHORT")) {
+  throw new Error("LONG/SHORT alerts must still fire on a new candle");
 }
 
 const sampleToken = "watch-test-fixture-token-32chars!!";

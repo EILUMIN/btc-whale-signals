@@ -8,8 +8,9 @@
     "start": "next start --port 43127 --hostname 127.0.0.1",
     "lint": "eslint",
     "monitor": "tsx src/cli/monitor.ts",
-    "test": "tsx scripts/check-signals.ts",
-    "test:watch-alert": "tsx scripts/test-discord-watch.ts"
+    "test": "tsx scripts/check-signals.ts && tsx scripts/check-precision.ts",
+    "test:watch-alert": "tsx scripts/test-discord-watch.ts",
+    "test:backtest": "tsx scripts/check-precision.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

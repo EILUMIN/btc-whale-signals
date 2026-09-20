@@ -11,6 +11,7 @@ type Props = {
   entry?: number | null;
   stop?: number | null;
   takeProfit?: number | null;
+  takeProfit2?: number | null;
 };
 
 export function M1Chart({
@@ -21,6 +22,7 @@ export function M1Chart({
   entry,
   stop,
   takeProfit,
+  takeProfit2,
 }: Props) {
   const slice = bars.slice(-60);
   if (slice.length < 2) {
@@ -51,6 +53,7 @@ export function M1Chart({
     entry,
     stop,
     takeProfit,
+    takeProfit2,
     ...nearbyWalls.flatMap((wall) => [wall.priceLow, wall.priceHigh]),
   ].filter((n): n is number => typeof n === "number" && n > 0);
   const min = Math.min(...lows, ...extras);
@@ -216,6 +219,17 @@ export function M1Chart({
             stroke="#4ade80"
             strokeWidth={1.2}
             strokeDasharray="2 3"
+          />
+        ) : null}
+        {takeProfit2 ? (
+          <line
+            x1={padL}
+            x2={width - padR}
+            y1={y(takeProfit2)}
+            y2={y(takeProfit2)}
+            stroke="#86efac"
+            strokeWidth={1}
+            strokeDasharray="4 4"
           />
         ) : null}
       </svg>

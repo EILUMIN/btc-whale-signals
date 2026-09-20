@@ -99,3 +99,19 @@ Production:
 npm run build
 npm start
 ```
+
+## Precision LONG/SHORT (test branch)
+
+This upgrade adds a **precision-first** LONG / SHORT / WAIT layer on top of the whale desk. Production `main` is unchanged until this branch is promoted.
+
+- Default state is **WAIT**.
+- Paper trading is **on by default**. No live orders.
+- Email/Discord fire only for valid **LONG** or **SHORT** (plus the existing WATCH test).
+- Futures data is public (Binance / Bybit / OKX). No private keys.
+- Confirmed on-chain flow supports or vetoes a setup. Pending mempool never entries.
+
+```bash
+npm test
+npm run test:backtest
+npm run dev
+```

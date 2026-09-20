@@ -91,7 +91,7 @@ export function Dashboard() {
         setScanPhase(json.ok ? "idle" : "failed");
         const pingThisCandle =
           Boolean(json.alertPing) &&
-          (json.signal === "BUY" || json.signal === "SELL") &&
+          (json.direction === "LONG" || json.direction === "SHORT") &&
           lastPingCandle.current !== json.candleKey;
         if (pingThisCandle) {
           lastPingCandle.current = json.candleKey;
@@ -193,7 +193,8 @@ export function Dashboard() {
           ok: venue.ok,
           timestamp: data?.scannedAt ?? new Date(nowMs).toISOString(),
         }));
-  const signal = data?.signal ?? "WAIT";
+  const signal = data?.direction ?? "WAIT";
+  const whaleSignal = data?.whaleSignal ?? data?.signal ?? "WAIT";
   const scanLabel =
     scanPhase === "scanning" && !data
       ? t.scanScanning
@@ -257,7 +258,7 @@ export function Dashboard() {
         </div>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard
           label={t.liveCvd}
           value={data ? data.cvd.toFixed(2) : "—"}
@@ -284,17 +285,41 @@ export function Dashboard() {
           tone={(data?.flow.outflows ?? 0) >= 500 ? "buy" : undefined}
         />
         <StatCard
-          label={t.m1Signal}
-          value={signal}
+          label={t.setupState}
+          value={data?.dataStale ? t.dataStale : signal}
           hint={
-            signal === "SELL"
+            signal === "SHORT"
+              ? t.shortHint
+              : signal === "LONG"
+                ? t.longHint
+                : data?.waitReason || t.waitHint
+          }
+          tone={
+            data?.dataStale
+              ? "stale"
+              : signal === "LONG"
+                ? "buy"
+                : signal === "SHORT"
+                  ? "sell"
+                  : "wait"
+          }
+        />
+        <StatCard
+          label={t.whaleTape}
+          value={whaleSignal}
+          hint={
+            whaleSignal === "SELL"
               ? t.sellHint
-              : signal === "BUY"
+              : whaleSignal === "BUY"
                 ? t.buyHint
                 : t.waitHint
           }
           tone={
-            signal === "BUY" ? "buy" : signal === "SELL" ? "sell" : undefined
+            whaleSignal === "BUY"
+              ? "buy"
+              : whaleSignal === "SELL"
+                ? "sell"
+                : "wait"
           }
         />
       </section>
@@ -426,13 +451,15 @@ export function Dashboard() {
                   walls={data.walls}
                   live={livePrice?.usd ?? data.live_price}
                   vwap={data.live_vwap}
-                  entry={data.armedPlan?.entry}
-                  stop={data.armedPlan?.stop}
-                  takeProfit={data.armedPlan?.takeProfit}
+                  entry={data.tradePlan?.entry ?? data.armedPlan?.entry}
+                  stop={data.tradePlan?.stop ?? data.armedPlan?.stop}
+                  takeProfit={data.tradePlan?.tp1 ?? data.armedPlan?.takeProfit}
+                  takeProfit2={data.tradePlan?.tp2}
                 />
                 <p className="text-xs text-muted-foreground">{t.chartHint}</p>
               </CardContent>
             </Card>
+            <TradePlanCard data={data} t={t} />
             <ArmedTicket data={data} t={t} />
             <WallList walls={data.walls} t={t} />
           </section>
@@ -459,12 +486,15 @@ export function Dashboard() {
                 ))}
               </CardContent>
             </Card>
+            <FuturesPanel data={data} t={t} nowMs={nowMs} />
+            <PaperPanel data={data} t={t} />
             <FlowTape data={data} t={t} />
             <Card className="shadow-none">
               <CardHeader>
                 <CardTitle className="text-sm">{t.howToRead}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <p>{t.precisionExplain}</p>
                 <p>{t.inflowExplain}</p>
                 <p>{t.outflowExplain}</p>
                 <p>{t.unlabeledExplain}</p>
@@ -483,12 +513,16 @@ export function Dashboard() {
 function ArmedTicket({ data, t }: { data: M1Snapshot; t: Dictionary }) {
   const plan = data.armedPlan;
   const pu = data.puPrimePlan;
-  if (!plan || (data.signal !== "BUY" && data.signal !== "SELL")) {
+  const armed =
+    (data.direction === "LONG" || data.direction === "SHORT") && data.tradePlan;
+  if (!plan || !armed) {
     return (
       <Card className="border-amber-500/40 bg-amber-500/10 shadow-none">
         <CardContent className="space-y-2 pt-1">
           <p className="text-sm font-semibold">{t.waiting}</p>
-          <p className="text-sm text-muted-foreground">{data.recommendation}</p>
+          <p className="text-sm text-muted-foreground">
+            {data.waitReason || data.recommendation}
+          </p>
           <p className="text-xs text-muted-foreground">{t.puPrimeWait}</p>
         </CardContent>
       </Card>
@@ -781,6 +815,228 @@ function PlanGrid({
   );
 }
 
+function TradePlanCard({ data, t }: { data: M1Snapshot; t: Dictionary }) {
+  const plan = data.tradePlan;
+  const direction = data.direction ?? "WAIT";
+  const wait = direction === "WAIT" || !plan;
+  return (
+    <Card
+      className={`shadow-none ${
+        wait
+          ? "border-amber-500/40 bg-amber-500/10"
+          : direction === "SHORT"
+            ? "border-red-500/40 bg-red-500/10"
+            : "border-emerald-500/40 bg-emerald-500/10"
+      }`}
+    >
+      <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <CardTitle className="text-sm">{t.tradePlanTitle}</CardTitle>
+        {data.paperTrading ? (
+          <Badge variant="outline" className="border-amber-500/40 text-amber-200">
+            {t.paperBadge}
+          </Badge>
+        ) : null}
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0 text-sm">
+        <p
+          className={`font-mono text-3xl font-semibold ${
+            wait
+              ? "text-amber-300"
+              : direction === "LONG"
+                ? "text-emerald-400"
+                : "text-red-400"
+          }`}
+        >
+          {data.dataStale ? t.dataStale : direction}
+        </p>
+        {wait ? (
+          <p className="text-muted-foreground">
+            {data.waitReason || data.recommendation}
+          </p>
+        ) : (
+          <>
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                  {t.entryZone}
+                </dt>
+                <dd className="font-mono text-lg">
+                  {formatUsd(plan.entryLow)} – {formatUsd(plan.entryHigh)}
+                </dd>
+                <dd className="font-mono text-sm text-muted-foreground">
+                  {formatUsd(plan.entry)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                  {t.stopLoss}
+                </dt>
+                <dd className="font-mono text-lg text-red-300">
+                  {formatUsd(plan.stop)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                  {t.takeProfit1}
+                </dt>
+                <dd className="font-mono text-lg text-emerald-300">
+                  {formatUsd(plan.tp1)} · 1:{plan.rrTp1.toFixed(2)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                  {t.takeProfit2}
+                </dt>
+                <dd className="font-mono text-lg text-emerald-300">
+                  {formatUsd(plan.tp2)} · 1:{plan.rrTp2.toFixed(2)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                  {t.sizeBtc}
+                </dt>
+                <dd className="font-mono text-lg">{formatBtc(plan.sizeBtc)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                  {t.maxRisk}
+                </dt>
+                <dd className="font-mono text-lg">{formatUsd(plan.riskUsd)}</dd>
+                <dd className="text-[11px] text-muted-foreground">
+                  {t.estimatedLoss} {formatUsd(plan.estimatedLossUsd)}
+                </dd>
+              </div>
+            </dl>
+            <p>
+              <span className="text-xs uppercase tracking-wider text-muted-foreground">
+                {t.strength}
+              </span>{" "}
+              {plan.strength}
+            </p>
+            <p className="text-xs text-muted-foreground">{plan.leverageHint}</p>
+            <p>
+              <span className="text-xs uppercase tracking-wider text-muted-foreground">
+                {t.invalidation}
+              </span>{" "}
+              {plan.invalidation}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t.signalTime}: {formatIsoUtc(plan.timestamp)} · {t.signalExpiry}:{" "}
+              {formatIsoUtc(plan.expiry)}
+            </p>
+            <p>
+              <span className="text-xs uppercase tracking-wider text-muted-foreground">
+                {t.reasonLabel}
+              </span>{" "}
+              {plan.reason}
+            </p>
+          </>
+        )}
+        <p className="text-[11px] text-muted-foreground">{t.paperHint}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FuturesPanel({
+  data,
+  t,
+  nowMs,
+}: {
+  data: M1Snapshot;
+  t: Dictionary;
+  nowMs: number;
+}) {
+  const fut = data.futures;
+  return (
+    <Card className="shadow-none">
+      <CardHeader className="space-y-1">
+        <CardTitle className="text-sm">{t.futuresTitle}</CardTitle>
+        <p className="text-[11px] text-muted-foreground">
+          {t.futuresHint}
+          {fut?.source ? ` · ${fut.source}` : ""}
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {!fut || fut.metrics.length === 0 ? (
+          <p className="text-muted-foreground">{t.dataStale}</p>
+        ) : (
+          fut.metrics.map((row) => {
+            const age = row.timestamp ? ageSeconds(row.timestamp, nowMs) : null;
+            const tone =
+              row.tone === "long"
+                ? "text-emerald-300"
+                : row.tone === "short"
+                  ? "text-red-300"
+                  : row.tone === "stale"
+                    ? "text-zinc-400"
+                    : "text-amber-300";
+            return (
+              <div
+                key={row.label}
+                className="rounded-md border border-border/60 px-2 py-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                    {row.label}
+                  </span>
+                  <span className={`font-mono text-xs font-semibold ${tone}`}>
+                    {row.display}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {row.source}
+                  {row.timestamp ? ` · ${formatIsoUtc(row.timestamp)}` : ""}
+                  {age !== null ? ` · ${age}s` : ""}
+                  {row.stale || row.missing ? ` · ${t.dataStale}` : ""}
+                </p>
+              </div>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PaperPanel({ data, t }: { data: M1Snapshot; t: Dictionary }) {
+  const stats = data.paperStats;
+  const pct =
+    stats?.winRate === null || stats?.winRate === undefined
+      ? "—"
+      : `${(stats.winRate * 100).toFixed(0)}%`;
+  return (
+    <Card className="shadow-none">
+      <CardHeader>
+        <CardTitle className="text-sm">{t.paperStats}</CardTitle>
+      </CardHeader>
+      <CardContent className="grid grid-cols-2 gap-2 text-sm">
+        <MiniStat label={t.winRate} value={pct} />
+        <MiniStat
+          label={t.avgR}
+          value={stats?.avgR === null || stats?.avgR === undefined ? "—" : stats.avgR.toFixed(2)}
+        />
+        <MiniStat
+          label={t.maxDd}
+          value={stats ? stats.maxDrawdownR.toFixed(2) : "—"}
+        />
+        <MiniStat
+          label={t.loseStreak}
+          value={stats ? String(stats.losingStreak) : "—"}
+        />
+        <MiniStat
+          label={t.falseSignals}
+          value={stats ? String(stats.falseSignals) : "—"}
+        />
+        <MiniStat
+          label={t.blockedSignals}
+          value={stats ? String(stats.blocked) : "—"}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -790,7 +1046,7 @@ function StatCard({
   label: string;
   value: string;
   hint: string;
-  tone?: "buy" | "sell";
+  tone?: "buy" | "sell" | "wait" | "stale";
 }) {
   return (
     <Card className="shadow-none">
@@ -804,7 +1060,11 @@ function StatCard({
               ? "text-emerald-400"
               : tone === "sell"
                 ? "text-red-400"
-                : ""
+                : tone === "wait"
+                  ? "text-amber-300"
+                  : tone === "stale"
+                    ? "text-zinc-400"
+                    : ""
           }`}
         >
           {value}

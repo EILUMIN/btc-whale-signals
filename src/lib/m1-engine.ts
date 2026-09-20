@@ -4,7 +4,6 @@ import {
   M1_LIMIT,
   M1_TF,
   SPOOF_DELAY_MS,
-  buildWallPlan,
   candleKeyUnix,
   clusterWalls,
   cvdFromBars,
@@ -19,6 +18,10 @@ import {
 import { scanOnchainFlow } from "@/lib/onchain-flow";
 import { fetchJson, sleep, withRetry } from "@/lib/http";
 import { roundPrice } from "@/lib/price";
+import { emptyFutures, fetchFuturesSnapshot } from "@/lib/futures";
+import { decidePrecisionSetup } from "@/lib/precision";
+import { markToMarket, recordPrecisionDecision } from "@/lib/paper";
+import { loadRiskSettings } from "@/lib/risk-settings";
 
 type ExchangeId = "binance" | "binanceus" | "coinbaseexchange" | "coinbase" | "kraken";
 
@@ -278,15 +281,18 @@ function cvdLabel(cvd: number): string {
 
 type Cache = { at: number; snap: M1Snapshot };
 type FlowCache = { at: number; flow: ReturnType<typeof emptyOnchainFlow> };
+type FutCache = { at: number; snap: Awaited<ReturnType<typeof fetchFuturesSnapshot>> };
 const g = globalThis as unknown as {
   __m1Cache?: Cache;
   __m1FlowCache?: FlowCache;
   __m1FlowJob?: Promise<ReturnType<typeof emptyOnchainFlow>>;
+  __m1FutCache?: FutCache;
 };
 
 const SNAP_CACHE_MS = 8_000;
 const FLOW_CACHE_MS = 45_000;
 const FLOW_WAIT_MS = 9_000;
+const FUT_CACHE_MS = 20_000;
 
 function withTimeout<T>(job: Promise<T>, ms: number): Promise<T | undefined> {
   return new Promise((resolve) => {
@@ -328,6 +334,20 @@ async function cachedOnchainFlow() {
   return { flow: emptyOnchainFlow(), fresh: false };
 }
 
+async function cachedFutures() {
+  const now = Date.now();
+  if (g.__m1FutCache && now - g.__m1FutCache.at < FUT_CACHE_MS) {
+    return g.__m1FutCache.snap;
+  }
+  try {
+    const snap = await fetchFuturesSnapshot();
+    g.__m1FutCache = { at: Date.now(), snap };
+    return snap;
+  } catch {
+    return emptyFutures("WAIT — DATA STALE");
+  }
+}
+
 export async function getM1Snapshot(options?: {
   skipSpoofDelay?: boolean;
 }): Promise<M1Snapshot> {
@@ -337,11 +357,12 @@ export async function getM1Snapshot(options?: {
     return applyM1AlertLatch(g.__m1Cache.snap);
   }
 
-  const [venues, ohlcvSets, delta, flowPack] = await Promise.all([
+  const [venues, ohlcvSets, delta, flowPack, futures] = await Promise.all([
     Promise.all(ROUTES.map(pullWithFallback)),
     Promise.all(ROUTES.map(pullOhlcv)),
     fetchBinanceDeltaBars(),
     cachedOnchainFlow(),
+    cachedFutures(),
   ]);
   const flow = flowPack.flow;
 
@@ -407,13 +428,109 @@ export async function getM1Snapshot(options?: {
     }
   }
 
-  const armedPlan =
-    decision.signal === "BUY" || decision.signal === "SELL"
-      ? decision.wall
-        ? buildWallPlan(decision.signal, live_vwap, decision.wall)
-        : null
+  const statsBefore = markToMarket(livePrice || live_vwap);
+  const openDir =
+    statsBefore.open &&
+    (statsBefore.open.direction === "LONG" ||
+      statsBefore.open.direction === "SHORT")
+      ? statsBefore.open.direction
       : null;
-  const puPrimePlan = armedPlan ? toPuPrimePlan(armedPlan) : null;
+  const active = openDir
+    ? {
+        direction: openDir,
+        expiryUnix:
+          Date.parse(statsBefore.open!.at) +
+          loadRiskSettings().signalExpirySec * 1000,
+      }
+    : null;
+  const precisionInput = {
+    live: livePrice || live_vwap,
+    vwap: live_vwap,
+    cvd,
+    bars,
+    bidWalls,
+    askWalls,
+    flow,
+    futures,
+    priceTimestamp: new Date().toISOString(),
+    spoofChecked,
+    spoofCleared,
+    venuesOk: goods.length,
+    active,
+    tradesToday: statsBefore.tradesToday,
+    dailyLossUsd: statsBefore.dailyLossUsd,
+  };
+  let finalPrecision = decidePrecisionSetup(precisionInput);
+
+  if (
+    (finalPrecision.direction === "LONG" ||
+      finalPrecision.direction === "SHORT") &&
+    !spoofChecked
+  ) {
+    spoofChecked = true;
+    const wallForSpoof =
+      finalPrecision.direction === "LONG"
+        ? bidWalls.filter((w) => w.btc >= 80).sort((a, b) => b.btc - a.btc)[0]
+        : askWalls.filter((w) => w.btc >= 80).sort((a, b) => b.btc - a.btc)[0];
+    if (!options?.skipSpoofDelay) {
+      await sleep(SPOOF_DELAY_MS);
+    }
+    const again = await Promise.all(ROUTES.map(pullWithFallback));
+    const clustered = wallsFromBooks(again);
+    bidWalls = clustered.bidWalls;
+    askWalls = clustered.askWalls;
+    walls = clustered.walls;
+    spoofCleared = wallForSpoof
+      ? wallStillReal(
+          wallForSpoof,
+          wallForSpoof.side === "ask" ? askWalls : bidWalls
+        )
+      : false;
+    finalPrecision = decidePrecisionSetup({
+      ...precisionInput,
+      bidWalls,
+      askWalls,
+      spoofChecked,
+      spoofCleared,
+      priceTimestamp: new Date().toISOString(),
+    });
+  }
+
+  const paper = recordPrecisionDecision({
+    candleKey: candleKeyUnix(now),
+    direction: finalPrecision.direction,
+    waitReason: finalPrecision.waitReason,
+    plan: finalPrecision.plan,
+    live: livePrice || live_vwap,
+  });
+
+  const precisionArmed =
+    finalPrecision.plan &&
+    (finalPrecision.direction === "LONG" ||
+      finalPrecision.direction === "SHORT")
+      ? {
+          side:
+            finalPrecision.direction === "LONG"
+              ? ("BUY" as const)
+              : ("SELL" as const),
+          entry: finalPrecision.plan.entry,
+          stop: finalPrecision.plan.stop,
+          takeProfit: finalPrecision.plan.tp2,
+          wallPrice: finalPrecision.plan.entry,
+          riskPerBtc: Math.abs(
+            finalPrecision.plan.entry - finalPrecision.plan.stop
+          ),
+          riskUsd: finalPrecision.plan.riskUsd,
+          walletUsd: 1_000,
+          sizeBtc: finalPrecision.plan.sizeBtc,
+          sizeLots: finalPrecision.plan.sizeLots,
+          notionalUsd: finalPrecision.plan.notionalUsd,
+          rr: finalPrecision.plan.rrTp2,
+          book: "exchange" as const,
+          gapUsd: 0,
+          spreadUsd: 0,
+        }
+      : null;
 
   const errors = venues
     .filter((v) => !v.ok)
@@ -429,11 +546,14 @@ export async function getM1Snapshot(options?: {
     cvd: roundPrice(cvd),
     cvdLabel: cvdLabel(cvd),
     signal: decision.signal,
-    recommendation: decision.recommendation,
+    recommendation:
+      finalPrecision.direction === "WAIT"
+        ? finalPrecision.waitReason || decision.recommendation
+        : finalPrecision.plan?.reason || decision.recommendation,
     spoofChecked,
     spoofCleared,
-    armedPlan,
-    puPrimePlan,
+    armedPlan: precisionArmed,
+    puPrimePlan: precisionArmed ? toPuPrimePlan(precisionArmed) : null,
     walls,
     askWalls,
     bidWalls,
@@ -448,6 +568,15 @@ export async function getM1Snapshot(options?: {
     scannedAt: new Date().toISOString(),
     scanStatus: goods.length > 0 ? (flowPack.fresh ? "ok" : "scanning") : "failed",
     source: goods.map((v) => v.name).join(" + ") || "none",
+    direction: finalPrecision.direction,
+    waitReason: finalPrecision.waitReason,
+    whaleSignal: decision.signal,
+    signalStrength: finalPrecision.strength,
+    dataStale: finalPrecision.dataStale,
+    futures,
+    tradePlan: finalPrecision.plan,
+    paperTrading: loadRiskSettings().paperTrading,
+    paperStats: paper,
   };
 
   g.__m1Cache = { at: Date.now(), snap };
@@ -484,5 +613,14 @@ export function emptyM1Snapshot(error: string): M1Snapshot {
     emailDetail: "",
     discordStatus: "idle",
     discordDetail: "",
+    direction: "WAIT",
+    waitReason: error,
+    whaleSignal: "WAIT",
+    signalStrength: "blocked",
+    dataStale: true,
+    futures: emptyFutures(error),
+    tradePlan: null,
+    paperTrading: true,
+    paperStats: null,
   };
 }

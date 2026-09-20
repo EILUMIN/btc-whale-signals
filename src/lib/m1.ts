@@ -1,4 +1,11 @@
 import { roundPrice } from "@/lib/price";
+import type { FuturesSnapshot } from "@/lib/futures";
+import type { PaperStats } from "@/lib/paper";
+import type {
+  PrecisionDirection,
+  PrecisionPlan,
+  SignalStrength,
+} from "@/lib/precision";
 
 export const M1_TF = "1m";
 export const M1_LIMIT = 90;
@@ -141,6 +148,15 @@ export type M1Snapshot = {
   emailDetail?: string;
   discordStatus?: "sent" | "skipped" | "failed" | "idle";
   discordDetail?: string;
+  direction?: PrecisionDirection;
+  waitReason?: string;
+  whaleSignal?: M1Signal;
+  signalStrength?: SignalStrength;
+  dataStale?: boolean;
+  futures?: FuturesSnapshot | null;
+  tradePlan?: PrecisionPlan | null;
+  paperTrading?: boolean;
+  paperStats?: PaperStats | null;
 };
 
 export function candleKeyUnix(unixMs = Date.now()): number {
