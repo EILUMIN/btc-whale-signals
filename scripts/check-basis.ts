@@ -174,44 +174,54 @@ assert(parseInstrument("BTC-USDT")?.key === "BTC-USDT", "parse index/spot");
 assert(parseInstrument("ETH-USDT") === null, "reject ETH");
 assert(BASIS_UNAVAILABLE_NOTE === "BASIS UNAVAILABLE — optional confirmation missing.", "note");
 
-const live = await fetchFuturesSnapshot();
-if (!live.basisAvailable || live.basis === null || live.basisPct === null) {
-  throw new Error(`live public basis unavailable: ${live.basisReason}`);
-}
-if (!live.basisSource?.includes("okx") && !live.basisSource?.includes("binance")) {
-  throw new Error(`unexpected live basis source ${live.basisSource}`);
-}
-const expectedPct =
-  live.spotIndexPrice && live.spotIndexPrice > 0 && live.basis !== null
-    ? live.basis / live.spotIndexPrice
-    : null;
-if (
-  expectedPct === null ||
-  live.basisPct === null ||
-  Math.abs(live.basisPct - expectedPct) > 1e-10
-) {
-  throw new Error(`live basis% ${live.basisPct} != ${expectedPct}`);
+async function livePublicPair() {
+  const live = await fetchFuturesSnapshot();
+  if (!live.basisAvailable || live.basis === null || live.basisPct === null) {
+    throw new Error(`live public basis unavailable: ${live.basisReason}`);
+  }
+  if (!live.basisSource?.includes("okx") && !live.basisSource?.includes("binance")) {
+    throw new Error(`unexpected live basis source ${live.basisSource}`);
+  }
+  const expectedPct =
+    live.spotIndexPrice && live.spotIndexPrice > 0 && live.basis !== null
+      ? live.basis / live.spotIndexPrice
+      : null;
+  if (
+    expectedPct === null ||
+    live.basisPct === null ||
+    Math.abs(live.basisPct - expectedPct) > 1e-10
+  ) {
+    throw new Error(`live basis% ${live.basisPct} != ${expectedPct}`);
+  }
+  return live;
 }
 
-console.log("basis ok", {
-  unit: {
-    valid: formatBasisDisplay(valid.basis!, valid.basisPct!),
-    positive: formatBasisDisplay(contango.basis!, contango.basisPct!),
-    negative: formatBasisDisplay(backward.basis!, backward.basisPct!),
-    missingSpot: missingSpot.reason,
-    missingFutures: missingFutures.reason,
-    stale: stale.status,
-    mismatchedTs: skew.reason,
-    mismatchedInst: eth.reason,
-  },
-  live: {
-    source: live.basisSource,
-    futuresInstrument: live.futuresInstrument,
-    spotInstrument: live.spotInstrument,
-    futuresPrice: live.futuresPrice,
-    spotIndexPrice: live.spotIndexPrice,
-    basis: live.basis,
-    basisPct: live.basisPct,
-    status: live.basisStatus,
-  },
-});
+livePublicPair()
+  .then((live) => {
+    console.log("basis ok", {
+      unit: {
+        valid: formatBasisDisplay(valid.basis!, valid.basisPct!),
+        positive: formatBasisDisplay(contango.basis!, contango.basisPct!),
+        negative: formatBasisDisplay(backward.basis!, backward.basisPct!),
+        missingSpot: missingSpot.reason,
+        missingFutures: missingFutures.reason,
+        stale: stale.status,
+        mismatchedTs: skew.reason,
+        mismatchedInst: eth.reason,
+      },
+      live: {
+        source: live.basisSource,
+        futuresInstrument: live.futuresInstrument,
+        spotInstrument: live.spotInstrument,
+        futuresPrice: live.futuresPrice,
+        spotIndexPrice: live.spotIndexPrice,
+        basis: live.basis,
+        basisPct: live.basisPct,
+        status: live.basisStatus,
+      },
+    });
+  })
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
