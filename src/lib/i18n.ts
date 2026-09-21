@@ -156,6 +156,10 @@ export const dictionaries = {
     possibleEntryTitle: "POSSIBLE ENTRY",
     possibleEntryHint:
       "Separate BTCUSD chart engine. M15 trend, M5 confirmation, M1 timing. Alert only — not an order. Does not replace the whale tape.",
+    overallBiasTitle: "OVERALL MARKET BIAS",
+    overallBiasHint:
+      "Live BTCUSD candles only. H1 direction, M15 structure, M5 confirmation, M1 timing. Does not replace the whale tape or possible-entry card.",
+    tfAgreement: "Timeframe agreement",
     whaleConfirmLabel: "Whale confirmation",
     trendTimeframe: "Trend timeframe",
     lastUpdated: "Last updated",
@@ -316,6 +320,10 @@ export const dictionaries = {
     possibleEntryTitle: "POSSIBLE ENTRY",
     possibleEntryHint:
       "Hiwalay na BTCUSD chart engine. M15 trend, M5 confirmation, M1 timing. Alert lang — hindi order. Hindi nito papalitan ang whale tape.",
+    overallBiasTitle: "OVERALL MARKET BIAS",
+    overallBiasHint:
+      "Live BTCUSD candles lang. H1 direksyon, M15 structure, M5 confirmation, M1 timing. Hindi nito papalitan ang whale tape o possible-entry card.",
+    tfAgreement: "Tugma ng timeframe",
     whaleConfirmLabel: "Whale confirmation",
     trendTimeframe: "Trend timeframe",
     lastUpdated: "Huling update",

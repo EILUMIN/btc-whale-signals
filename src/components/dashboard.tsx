@@ -460,6 +460,7 @@ export function Dashboard() {
               </CardContent>
             </Card>
             <TradePlanCard data={data} t={t} />
+            <OverallBiasCard data={data} t={t} nowMs={nowMs} />
             <PossibleEntryCard data={data} t={t} nowMs={nowMs} />
             <ArmedTicket data={data} t={t} />
             <WallList walls={data.walls} t={t} />
@@ -965,6 +966,74 @@ function TradePlanCard({ data, t }: { data: M1Snapshot; t: Dictionary }) {
           </>
         )}
         <p className="text-[11px] text-muted-foreground">{t.paperHint}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OverallBiasCard({
+  data,
+  t,
+  nowMs,
+}: {
+  data: M1Snapshot;
+  t: Dictionary;
+  nowMs: number;
+}) {
+  const bias = data.overallBias;
+  const status = bias?.status ?? "WAIT";
+  const wait = status === "WAIT";
+  const age = bias?.timestamp ? ageSeconds(bias.timestamp, nowMs) : null;
+  return (
+    <Card
+      className={`shadow-none ${
+        wait
+          ? "border-border/70"
+          : status === "POSSIBLE SHORT"
+            ? "border-red-500/40 bg-red-500/10"
+            : "border-emerald-500/40 bg-emerald-500/10"
+      }`}
+    >
+      <CardHeader className="space-y-1">
+        <CardTitle className="text-sm">{t.overallBiasTitle}</CardTitle>
+        <p className="text-[11px] text-muted-foreground">{t.overallBiasHint}</p>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0 text-sm">
+        <p
+          className={`font-mono text-2xl font-semibold ${
+            wait
+              ? "text-amber-300"
+              : status === "POSSIBLE LONG"
+                ? "text-emerald-400"
+                : "text-red-400"
+          }`}
+        >
+          {status}
+        </p>
+        <p className="text-muted-foreground">{bias?.reason ?? t.waitHint}</p>
+        <p>
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.tfAgreement}
+          </span>{" "}
+          {bias?.agreement.summary ?? "—"}
+        </p>
+        <p>
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.confidenceLabel}
+          </span>{" "}
+          {bias ? `${bias.confidence}` : "—"}
+        </p>
+        <p>
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.trendTimeframe}
+          </span>{" "}
+          {bias?.timeframe ?? "H1 · M15 · M5 · M1"}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {t.lastUpdated}: {bias?.timestamp ? formatIsoUtc(bias.timestamp) : "—"}
+          {age !== null ? ` · ${t.dataAge.replace("{n}", String(age))}` : ""}
+          {bias?.source ? ` · ${bias.source}` : ""}
+        </p>
       </CardContent>
     </Card>
   );

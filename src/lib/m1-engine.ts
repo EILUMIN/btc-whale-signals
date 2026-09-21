@@ -26,6 +26,7 @@ import { WallStatusBook } from "@/lib/wall-status";
 import { closedBars, decidePossibleEntry, emptyPossibleEntry } from "@/lib/possible-entry";
 import { fetchPossibleEntryBars } from "@/lib/possible-entry-data";
 import { applyPossibleEntryAlert } from "@/lib/possible-entry-alert";
+import { decideOverallBias, emptyOverallBias } from "@/lib/overall-bias";
 
 type ExchangeId = "binance" | "binanceus" | "coinbaseexchange" | "coinbase" | "kraken";
 
@@ -580,6 +581,18 @@ export async function getM1Snapshot(options?: {
     m5Closed: entryPack.m5Closed,
     m1Closed: m1ClosedForEntry.length >= 8 ? true : entryPack.m1Closed,
   });
+  const overallBias = decideOverallBias({
+    h1: entryPack.h1 ?? [],
+    m15: entryPack.m15,
+    m5: entryPack.m5,
+    m1: m1ClosedForEntry.length >= 8 ? m1ClosedForEntry : entryPack.m1,
+    nowMs: Date.now(),
+    source: entryPack.source,
+    h1Closed: entryPack.h1Closed ?? false,
+    m15Closed: entryPack.m15Closed,
+    m5Closed: entryPack.m5Closed,
+    m1Closed: m1ClosedForEntry.length >= 8 ? true : entryPack.m1Closed,
+  });
 
   const snap: M1Snapshot = {
     ok: goods.length > 0 && bars.length > 0,
@@ -623,6 +636,7 @@ export async function getM1Snapshot(options?: {
     paperTrading: loadRiskSettings().paperTrading,
     paperStats: paper,
     possibleEntry,
+    overallBias,
   };
 
   g.__m1Cache = { at: Date.now(), snap };
@@ -671,5 +685,6 @@ export function emptyM1Snapshot(error: string): M1Snapshot {
     possibleEntry: emptyPossibleEntry(error),
     possibleEntryDiscord: "idle",
     possibleEntryDiscordDetail: "",
+    overallBias: emptyOverallBias(error),
   };
 }

@@ -8,6 +8,7 @@ import type {
 } from "@/lib/precision";
 import type { WallHit, WallStatus } from "@/lib/wall-status";
 import type { PossibleEntrySignal } from "@/lib/possible-entry";
+import type { OverallMarketBias } from "@/lib/overall-bias";
 
 export const M1_TF = "1m";
 export const M1_LIMIT = 90;
@@ -164,6 +165,7 @@ export type M1Snapshot = {
   possibleEntry?: PossibleEntrySignal | null;
   possibleEntryDiscord?: "sent" | "skipped" | "failed" | "idle";
   possibleEntryDiscordDetail?: string;
+  overallBias?: OverallMarketBias | null;
 };
 
 export function candleKeyUnix(unixMs = Date.now()): number {

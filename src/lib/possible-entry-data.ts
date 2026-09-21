@@ -27,12 +27,14 @@ const INTERVAL_MS = {
   "1m": 60_000,
   "5m": 5 * 60_000,
   "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
 } as const;
 
 const OKX_BAR = {
   "1m": "1m",
   "5m": "5m",
   "15m": "15m",
+  "1h": "1H",
 } as const;
 
 function toBar(time: number, o: number, h: number, l: number, c: number, v: number): TfBar | null {
@@ -123,10 +125,12 @@ export async function fetchTfBars(
 }
 
 export type PossibleEntryBars = {
+  h1: TfBar[];
   m15: TfBar[];
   m5: TfBar[];
   m1: TfBar[];
   source: string;
+  h1Closed: boolean;
   m15Closed: boolean;
   m5Closed: boolean;
   m1Closed: boolean;
@@ -138,17 +142,20 @@ export async function fetchPossibleEntryBars(nowMs = Date.now()): Promise<Possib
   if (g.__possibleEntryBars && nowMs - g.__possibleEntryBars.at < 20_000) {
     return g.__possibleEntryBars.pack;
   }
-  const [m15, m5, m1] = await Promise.all([
+  const [h1, m15, m5, m1] = await Promise.all([
+    fetchTfBars("1h", 80, nowMs),
     fetchTfBars("15m", 80, nowMs),
     fetchTfBars("5m", 80, nowMs),
     fetchTfBars("1m", 90, nowMs),
   ]);
-  const sources = [m15.source, m5.source, m1.source].filter((s) => s !== "none");
+  const sources = [h1.source, m15.source, m5.source, m1.source].filter((s) => s !== "none");
   const pack: PossibleEntryBars = {
+    h1: h1.bars,
     m15: m15.bars,
     m5: m5.bars,
     m1: m1.bars,
     source: sources.join(" + ") || "none",
+    h1Closed: h1.closed && h1.bars.length > 0,
     m15Closed: m15.closed && m15.bars.length > 0,
     m5Closed: m5.closed && m5.bars.length > 0,
     m1Closed: m1.closed && m1.bars.length > 0,
