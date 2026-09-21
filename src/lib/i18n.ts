@@ -57,6 +57,7 @@ export const dictionaries = {
       "Solid boxes are >500 BTC whale walls. Dashed boxes are notable ≥80 BTC clusters so you can see where size sits. Yellow = VWAP. White = live price.",
     wallsTitle: "Where whales placed levels",
     wallsEmpty: "No ≥80 BTC clustered walls on the visible book right now.",
+    wallHitLine: "Hit {time} · {price} · {exchange} · {side} · {btc}",
     flowTitle: "BTC flow monitor",
     flowEmpty:
       "No ≥10 BTC prints in the last hour from mempool, blocks, or watched wallets.",
@@ -153,7 +154,7 @@ export const dictionaries = {
     falseSignals: "False signals",
     blockedSignals: "Blocked by safety rules",
     precisionExplain:
-      "LONG and SHORT need executed order flow, CVD, a holding wall, rising open interest with price, fresh futures, anti-spoof, and acceptable R:R. Basis/premium is optional confirmation and never blocks a setup by itself. Confirmed on-chain flow only supports or vetoes. Pending mempool never entries. WAIT is the default.",
+      "LONG and SHORT need executed order flow, CVD, a holding wall, rising open interest with price, fresh futures, anti-spoof, and acceptable R:R. A wall HIT badge never fires a setup by itself. Basis/premium is optional confirmation and never blocks a setup by itself. Confirmed on-chain flow only supports or vetoes. Pending mempool never entries. WAIT is the default.",
   },
   fil: {
     htmlLang: "fil",
@@ -209,6 +210,7 @@ export const dictionaries = {
       "Solid boxes = >500 BTC whale walls. Dashed = notable ≥80 BTC clusters para makita kung saan naka-pwesto ang laki. Dilaw = VWAP. Puti = live price.",
     wallsTitle: "Saan nilagay ng whale ang levels",
     wallsEmpty: "Walang ≥80 BTC clustered wall sa nakikitang book ngayon.",
+    wallHitLine: "Hit {time} · {price} · {exchange} · {side} · {btc}",
     flowTitle: "BTC flow monitor",
     flowEmpty:
       "Walang ≥10 BTC print sa nakaraang oras mula sa mempool, blocks, o watched wallets.",
@@ -305,7 +307,7 @@ export const dictionaries = {
     falseSignals: "False signals",
     blockedSignals: "Hinarang ng safety rules",
     precisionExplain:
-      "Kailangan ng LONG/SHORT: executed order flow, CVD, holding wall, rising OI kasama ang presyo, fresh futures, anti-spoof, at sapat na R:R. Optional confirmation lang ang basis/premium — hindi nito hina-block ang setup mag-isa. Confirmed on-chain lang ang support o veto. Pending mempool hindi entry. WAIT ang default.",
+      "Kailangan ng LONG/SHORT: executed order flow, CVD, holding wall, rising OI kasama ang presyo, fresh futures, anti-spoof, at sapat na R:R. Hindi entry ang HIT badge mag-isa. Optional confirmation lang ang basis/premium — hindi nito hina-block ang setup mag-isa. Confirmed on-chain lang ang support o veto. Pending mempool hindi entry. WAIT ang default.",
   },
 } as const;
 

@@ -6,6 +6,7 @@ import type {
   PrecisionPlan,
   SignalStrength,
 } from "@/lib/precision";
+import type { WallHit, WallStatus } from "@/lib/wall-status";
 
 export const M1_TF = "1m";
 export const M1_LIMIT = 90;
@@ -41,6 +42,8 @@ export type WhaleWall = {
   btc: number;
   venues: string[];
   whale: boolean;
+  status?: WallStatus;
+  hit?: WallHit | null;
 };
 
 export type M1Bar = {

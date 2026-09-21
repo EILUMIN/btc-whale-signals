@@ -22,6 +22,7 @@ import { emptyFutures, fetchFuturesSnapshot } from "@/lib/futures";
 import { decidePrecisionSetup } from "@/lib/precision";
 import { markToMarket, recordPrecisionDecision } from "@/lib/paper";
 import { loadRiskSettings } from "@/lib/risk-settings";
+import { WallStatusBook } from "@/lib/wall-status";
 
 type ExchangeId = "binance" | "binanceus" | "coinbaseexchange" | "coinbase" | "kraken";
 
@@ -287,7 +288,13 @@ const g = globalThis as unknown as {
   __m1FlowCache?: FlowCache;
   __m1FlowJob?: Promise<ReturnType<typeof emptyOnchainFlow>>;
   __m1FutCache?: FutCache;
+  __wallStatus?: WallStatusBook;
 };
+
+function wallBook() {
+  g.__wallStatus ??= new WallStatusBook();
+  return g.__wallStatus;
+}
 
 const SNAP_CACHE_MS = 8_000;
 const FLOW_CACHE_MS = 45_000;
@@ -535,6 +542,15 @@ export async function getM1Snapshot(options?: {
   const errors = venues
     .filter((v) => !v.ok)
     .map((v) => `${v.name}: ${v.error}`);
+
+  // Status badges only. HIT never feeds LONG/SHORT by itself.
+  walls = wallBook().observe({
+    walls: [...bidWalls, ...askWalls],
+    live: livePrice || live_vwap,
+    nowMs: Date.now(),
+  });
+  bidWalls = walls.filter((w) => w.side === "bid" && w.status !== "REMOVED");
+  askWalls = walls.filter((w) => w.side === "ask" && w.status !== "REMOVED");
 
   const snap: M1Snapshot = {
     ok: goods.length > 0 && bars.length > 0,
