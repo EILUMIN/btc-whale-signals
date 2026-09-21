@@ -8,7 +8,7 @@
     "start": "next start --port 43127 --hostname 127.0.0.1",
     "lint": "eslint",
     "monitor": "tsx src/cli/monitor.ts",
-    "test": "tsx scripts/check-signals.ts && tsx scripts/check-precision.ts && tsx scripts/check-basis.ts && tsx scripts/check-liquidations.ts && tsx scripts/check-wall-status.ts",
+    "test": "tsx scripts/check-signals.ts && tsx scripts/check-precision.ts && tsx scripts/check-basis.ts && tsx scripts/check-liquidations.ts && tsx scripts/check-wall-status.ts && tsx scripts/check-possible-entry.ts",
     "test:watch-alert": "tsx scripts/test-discord-watch.ts",
     "test:backtest": "tsx scripts/check-precision.ts"
   },

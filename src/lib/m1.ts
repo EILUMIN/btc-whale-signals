@@ -7,6 +7,7 @@ import type {
   SignalStrength,
 } from "@/lib/precision";
 import type { WallHit, WallStatus } from "@/lib/wall-status";
+import type { PossibleEntrySignal } from "@/lib/possible-entry";
 
 export const M1_TF = "1m";
 export const M1_LIMIT = 90;
@@ -160,6 +161,9 @@ export type M1Snapshot = {
   tradePlan?: PrecisionPlan | null;
   paperTrading?: boolean;
   paperStats?: PaperStats | null;
+  possibleEntry?: PossibleEntrySignal | null;
+  possibleEntryDiscord?: "sent" | "skipped" | "failed" | "idle";
+  possibleEntryDiscordDetail?: string;
 };
 
 export function candleKeyUnix(unixMs = Date.now()): number {

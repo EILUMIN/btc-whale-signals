@@ -460,6 +460,7 @@ export function Dashboard() {
               </CardContent>
             </Card>
             <TradePlanCard data={data} t={t} />
+            <PossibleEntryCard data={data} t={t} nowMs={nowMs} />
             <ArmedTicket data={data} t={t} />
             <WallList walls={data.walls} t={t} />
           </section>
@@ -964,6 +965,112 @@ function TradePlanCard({ data, t }: { data: M1Snapshot; t: Dictionary }) {
           </>
         )}
         <p className="text-[11px] text-muted-foreground">{t.paperHint}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PossibleEntryCard({
+  data,
+  t,
+  nowMs,
+}: {
+  data: M1Snapshot;
+  t: Dictionary;
+  nowMs: number;
+}) {
+  const entry = data.possibleEntry;
+  const status = entry?.status ?? "WAIT";
+  const wait = status === "WAIT";
+  const whale = entry?.whaleConfirmation ?? "UNAVAILABLE";
+  const age = entry?.timestamp ? ageSeconds(entry.timestamp, nowMs) : null;
+  return (
+    <Card
+      className={`shadow-none ${
+        wait
+          ? "border-border/70"
+          : status === "POSSIBLE SHORT"
+            ? "border-red-500/40 bg-red-500/10"
+            : "border-emerald-500/40 bg-emerald-500/10"
+      }`}
+    >
+      <CardHeader className="space-y-1">
+        <CardTitle className="text-sm">{t.possibleEntryTitle}</CardTitle>
+        <p className="text-[11px] text-muted-foreground">{t.possibleEntryHint}</p>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0 text-sm">
+        <p
+          className={`font-mono text-2xl font-semibold ${
+            wait
+              ? "text-amber-300"
+              : status === "POSSIBLE LONG"
+                ? "text-emerald-400"
+                : "text-red-400"
+          }`}
+        >
+          {status}
+        </p>
+        <p className="text-muted-foreground">{entry?.reason ?? t.waitHint}</p>
+        {!wait && entry ? (
+          <dl className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                {t.entryZone}
+              </dt>
+              <dd className="font-mono text-lg">
+                {formatUsd(entry.entryLow ?? 0)} – {formatUsd(entry.entryHigh ?? 0)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                {t.stopLoss}
+              </dt>
+              <dd className="font-mono text-lg text-red-300">
+                {entry.stop !== null ? formatUsd(entry.stop) : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                {t.takeProfit1}
+              </dt>
+              <dd className="font-mono text-lg text-emerald-300">
+                {entry.tp1 !== null ? formatUsd(entry.tp1) : "—"}
+                {entry.rr !== null ? ` · 1:${entry.rr.toFixed(2)}` : ""}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wider text-muted-foreground">
+                {t.takeProfit2}
+              </dt>
+              <dd className="font-mono text-lg text-emerald-300">
+                {entry.tp2 !== null ? formatUsd(entry.tp2) : "—"}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+        <p>
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.confidenceLabel}
+          </span>{" "}
+          {entry ? `${entry.confidence}` : "—"}
+        </p>
+        <p>
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.trendTimeframe}
+          </span>{" "}
+          {entry?.timeframe ?? "M15 · M5 · M1"}
+        </p>
+        <p>
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t.whaleConfirmLabel}:
+          </span>{" "}
+          {whale}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {t.lastUpdated}: {entry?.timestamp ? formatIsoUtc(entry.timestamp) : "—"}
+          {age !== null ? ` · ${t.dataAge.replace("{n}", String(age))}` : ""}
+          {entry?.source ? ` · ${entry.source}` : ""}
+        </p>
       </CardContent>
     </Card>
   );

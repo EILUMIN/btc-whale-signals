@@ -23,6 +23,9 @@ import { decidePrecisionSetup } from "@/lib/precision";
 import { markToMarket, recordPrecisionDecision } from "@/lib/paper";
 import { loadRiskSettings } from "@/lib/risk-settings";
 import { WallStatusBook } from "@/lib/wall-status";
+import { closedBars, decidePossibleEntry, emptyPossibleEntry } from "@/lib/possible-entry";
+import { fetchPossibleEntryBars } from "@/lib/possible-entry-data";
+import { applyPossibleEntryAlert } from "@/lib/possible-entry-alert";
 
 type ExchangeId = "binance" | "binanceus" | "coinbaseexchange" | "coinbase" | "kraken";
 
@@ -361,15 +364,16 @@ export async function getM1Snapshot(options?: {
   const now = Date.now();
   const { applyM1AlertLatch } = await import("@/lib/signal-alert");
   if (g.__m1Cache && now - g.__m1Cache.at < SNAP_CACHE_MS) {
-    return applyM1AlertLatch(g.__m1Cache.snap);
+    return applyPossibleEntryAlert(await applyM1AlertLatch(g.__m1Cache.snap));
   }
 
-  const [venues, ohlcvSets, delta, flowPack, futures] = await Promise.all([
+  const [venues, ohlcvSets, delta, flowPack, futures, entryPack] = await Promise.all([
     Promise.all(ROUTES.map(pullWithFallback)),
     Promise.all(ROUTES.map(pullOhlcv)),
     fetchBinanceDeltaBars(),
     cachedOnchainFlow(),
     cachedFutures(),
+    fetchPossibleEntryBars(),
   ]);
   const flow = flowPack.flow;
 
@@ -552,6 +556,31 @@ export async function getM1Snapshot(options?: {
   bidWalls = walls.filter((w) => w.side === "bid" && w.status !== "REMOVED");
   askWalls = walls.filter((w) => w.side === "ask" && w.status !== "REMOVED");
 
+  const m1ClosedForEntry = closedBars(
+    bars.map((bar) => ({
+      time: bar.time,
+      open: bar.open,
+      high: bar.high,
+      low: bar.low,
+      close: bar.close,
+      volume: bar.volume,
+    })),
+    60_000,
+    Date.now()
+  );
+  const possibleEntry = decidePossibleEntry({
+    m15: entryPack.m15,
+    m5: entryPack.m5,
+    m1: m1ClosedForEntry.length >= 8 ? m1ClosedForEntry : entryPack.m1,
+    nowMs: Date.now(),
+    source: entryPack.source,
+    whaleSignal: decision.signal,
+    esploraSource: flow.esploraSource,
+    m15Closed: entryPack.m15Closed,
+    m5Closed: entryPack.m5Closed,
+    m1Closed: m1ClosedForEntry.length >= 8 ? true : entryPack.m1Closed,
+  });
+
   const snap: M1Snapshot = {
     ok: goods.length > 0 && bars.length > 0,
     error: goods.length === 0 ? errors.join("; ") || "No public books" : null,
@@ -593,10 +622,11 @@ export async function getM1Snapshot(options?: {
     tradePlan: finalPrecision.plan,
     paperTrading: loadRiskSettings().paperTrading,
     paperStats: paper,
+    possibleEntry,
   };
 
   g.__m1Cache = { at: Date.now(), snap };
-  return applyM1AlertLatch(snap);
+  return applyPossibleEntryAlert(await applyM1AlertLatch(snap));
 }
 
 export function emptyM1Snapshot(error: string): M1Snapshot {
@@ -638,5 +668,8 @@ export function emptyM1Snapshot(error: string): M1Snapshot {
     tradePlan: null,
     paperTrading: true,
     paperStats: null,
+    possibleEntry: emptyPossibleEntry(error),
+    possibleEntryDiscord: "idle",
+    possibleEntryDiscordDetail: "",
   };
 }

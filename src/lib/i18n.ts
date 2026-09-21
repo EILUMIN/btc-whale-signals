@@ -153,6 +153,13 @@ export const dictionaries = {
     loseStreak: "Losing streak",
     falseSignals: "False signals",
     blockedSignals: "Blocked by safety rules",
+    possibleEntryTitle: "POSSIBLE ENTRY",
+    possibleEntryHint:
+      "Separate BTCUSD chart engine. M15 trend, M5 confirmation, M1 timing. Alert only — not an order. Does not replace the whale tape.",
+    whaleConfirmLabel: "Whale confirmation",
+    trendTimeframe: "Trend timeframe",
+    lastUpdated: "Last updated",
+    confidenceLabel: "Confidence",
     precisionExplain:
       "LONG and SHORT need executed order flow, CVD, a holding wall, rising open interest with price, fresh futures, anti-spoof, and acceptable R:R. A wall HIT badge never fires a setup by itself. Basis/premium is optional confirmation and never blocks a setup by itself. Confirmed on-chain flow only supports or vetoes. Pending mempool never entries. WAIT is the default.",
   },
@@ -306,6 +313,13 @@ export const dictionaries = {
     loseStreak: "Losing streak",
     falseSignals: "False signals",
     blockedSignals: "Hinarang ng safety rules",
+    possibleEntryTitle: "POSSIBLE ENTRY",
+    possibleEntryHint:
+      "Hiwalay na BTCUSD chart engine. M15 trend, M5 confirmation, M1 timing. Alert lang — hindi order. Hindi nito papalitan ang whale tape.",
+    whaleConfirmLabel: "Whale confirmation",
+    trendTimeframe: "Trend timeframe",
+    lastUpdated: "Huling update",
+    confidenceLabel: "Confidence",
     precisionExplain:
       "Kailangan ng LONG/SHORT: executed order flow, CVD, holding wall, rising OI kasama ang presyo, fresh futures, anti-spoof, at sapat na R:R. Hindi entry ang HIT badge mag-isa. Optional confirmation lang ang basis/premium — hindi nito hina-block ang setup mag-isa. Confirmed on-chain lang ang support o veto. Pending mempool hindi entry. WAIT ang default.",
   },

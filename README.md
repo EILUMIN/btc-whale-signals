@@ -111,6 +111,7 @@ This upgrade adds a **precision-first** LONG / SHORT / WAIT layer on top of the 
 - Basis / premium uses the same venue for both legs: OKX `BTC-USDT-SWAP` vs OKX `BTC-USDT` index (spot ticker fallback on OKX only). Missing basis never blocks LONG/SHORT; it shows `BASIS UNAVAILABLE — optional confirmation missing.`
 - Liquidations are optional confirmation from OKX `BTC-USDT-SWAP` public liquidation orders (`data[].details[]`). A valid empty window shows `$0.00 · No liquidation events`. A missing or malformed payload shows `Unavailable`, never a fake zero. Liquidations never create a LONG or SHORT by themselves.
 - Each whale wall card shows **APPROACHING / HIT / REJECTED / BROKEN / REMOVED**. HIT is only when live price is inside that card's displayed range. HIT never fires LONG/SHORT by itself.
+- **Possible Entry** is a separate BTCUSD chart engine (M15 trend, M5 confirm, M1 timing). It never replaces the whale tape. Discord fires only on a new POSSIBLE LONG/SHORT, not on every candle.
 - Confirmed on-chain flow supports or vetoes a setup. Pending mempool never entries.
 
 ```bash
