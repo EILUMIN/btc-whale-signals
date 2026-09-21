@@ -56,7 +56,10 @@ export const dictionaries = {
     chartHint:
       "Solid boxes are >500 BTC whale walls. Dashed boxes are notable ≥80 BTC clusters so you can see where size sits. Yellow = VWAP. White = live price.",
     wallsTitle: "Where whales placed levels",
-    wallsEmpty: "No ≥80 BTC clustered walls on the visible book right now.",
+    wallsEmpty: "No nearby ≥80 BTC clustered walls on the visible book right now.",
+    distantWallsTitle: "Distant walls",
+    distantWallsHint:
+      "More than 1.5% from the live BTCUSD snapshot. Not nearby support or resistance.",
     wallHitLine: "Hit {time} · {price} · {exchange} · {side} · {btc}",
     flowTitle: "BTC flow monitor",
     flowEmpty:
@@ -220,7 +223,10 @@ export const dictionaries = {
     chartHint:
       "Solid boxes = >500 BTC whale walls. Dashed = notable ≥80 BTC clusters para makita kung saan naka-pwesto ang laki. Dilaw = VWAP. Puti = live price.",
     wallsTitle: "Saan nilagay ng whale ang levels",
-    wallsEmpty: "Walang ≥80 BTC clustered wall sa nakikitang book ngayon.",
+    wallsEmpty: "Walang malapit na ≥80 BTC clustered wall sa nakikitang book ngayon.",
+    distantWallsTitle: "Malalayong walls",
+    distantWallsHint:
+      "Mahigit 1.5% mula sa live BTCUSD snapshot. Hindi ito nearby support o resistance.",
     wallHitLine: "Hit {time} · {price} · {exchange} · {side} · {btc}",
     flowTitle: "BTC flow monitor",
     flowEmpty:

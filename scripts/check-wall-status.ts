@@ -2,8 +2,12 @@ import { decideM1Confluence, emptyOnchainFlow, type WhaleWall } from "../src/lib
 import { decidePrecisionSetup } from "../src/lib/precision";
 import { emptyFutures, type FuturesSnapshot } from "../src/lib/futures";
 import {
+  WALL_APPROACHING_PCT,
+  WALL_STALE_SEC,
   WallStatusBook,
+  isDistantWall,
   priceInDisplayedWallRange,
+  wallDistancePct,
 } from "../src/lib/wall-status";
 import { loadRiskSettings } from "../src/lib/risk-settings";
 
@@ -172,6 +176,85 @@ const hitOnly = decidePrecisionSetup({
   nowMs: now,
 });
 assert(hitOnly.direction === "WAIT", `HIT alone must not LONG/SHORT, got ${hitOnly.direction}`);
+
+assert(WALL_APPROACHING_PCT === 1.5, "WALL_APPROACHING_PCT");
+assert(WALL_STALE_SEC === 120, "WALL_STALE_SEC");
+
+const liveSnap = 86_600;
+const farAsk = wall({
+  side: "ask",
+  price: liveSnap * (1 + 2 / 100),
+  priceLow: liveSnap * (1 + 2 / 100) - 20,
+  priceHigh: liveSnap * (1 + 2 / 100) + 20,
+});
+const farBid = wall({
+  side: "bid",
+  price: liveSnap * (1 - 2 / 100),
+  priceLow: liveSnap * (1 - 2 / 100) - 20,
+  priceHigh: liveSnap * (1 - 2 / 100) + 20,
+});
+assert(isDistantWall(farAsk.price, liveSnap), "2% ask is distant");
+assert(isDistantWall(farBid.price, liveSnap), "2% bid is distant");
+assert(!isDistantWall(liveSnap * (1 + 1.5 / 100), liveSnap), "1.5% is still approaching");
+assert(
+  Math.abs(wallDistancePct(liveSnap * (1 + 1.5 / 100), liveSnap) - 1.5) < 1e-9,
+  `boundary distance ${wallDistancePct(liveSnap * (1 + 1.5 / 100), liveSnap)}`
+);
+
+const distantBook = new WallStatusBook();
+const distantOut = distantBook.observe({
+  walls: [farAsk, farBid],
+  live: liveSnap,
+  nowMs: now,
+});
+assert(
+  distantOut.every((item) => item.status === "DISTANT"),
+  `distant labels ${distantOut.map((item) => item.status).join(",")}`
+);
+assert(
+  distantOut.every((item) => item.status !== "APPROACHING"),
+  "distant must never be APPROACHING"
+);
+
+const exampleAsk = wall({
+  side: "ask",
+  price: liveSnap * (94_000 / 86_600),
+  priceLow: liveSnap * (94_000 / 86_600) - 25,
+  priceHigh: liveSnap * (94_000 / 86_600) + 25,
+});
+const exampleBid = wall({
+  side: "bid",
+  price: liveSnap * (40_000 / 86_600),
+  priceLow: liveSnap * (40_000 / 86_600) - 25,
+  priceHigh: liveSnap * (40_000 / 86_600) + 25,
+});
+const exampleBook = new WallStatusBook();
+const exampleOut = exampleBook.observe({
+  walls: [exampleAsk, exampleBid],
+  live: liveSnap,
+  nowMs: now,
+});
+assert(exampleOut.find((item) => item.side === "ask")?.status === "DISTANT", "high ask is DISTANT");
+assert(exampleOut.find((item) => item.side === "bid")?.status === "DISTANT", "low bid is DISTANT");
+
+const edgeAsk = wall({
+  side: "ask",
+  price: liveSnap * (1 + WALL_APPROACHING_PCT / 100),
+  priceLow: liveSnap * (1 + WALL_APPROACHING_PCT / 100) - 10,
+  priceHigh: liveSnap * (1 + WALL_APPROACHING_PCT / 100) + 10,
+});
+const edgeBook = new WallStatusBook();
+const edgeOut = edgeBook.observe({ walls: [edgeAsk], live: liveSnap, nowMs: now });
+assert(edgeOut[0].status === "APPROACHING", `1.5% edge ${edgeOut[0].status}`);
+
+const staleBook = new WallStatusBook();
+staleBook.observe({ walls: [ask], live: 80_050, nowMs: now });
+const staleGone = staleBook.observe({
+  walls: [],
+  live: 80_050,
+  nowMs: now + (WALL_STALE_SEC + 1) * 1000,
+});
+assert(staleGone[0].status === "REMOVED", `stale ${staleGone[0].status}`);
 
 console.log("wall-status ok", {
   approaching: approaching[0].status,

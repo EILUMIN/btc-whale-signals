@@ -463,7 +463,11 @@ export function Dashboard() {
             <OverallBiasCard data={data} t={t} nowMs={nowMs} />
             <PossibleEntryCard data={data} t={t} nowMs={nowMs} />
             <ArmedTicket data={data} t={t} />
-            <WallList walls={data.walls} t={t} />
+            <WallList
+              walls={data.walls}
+              live={livePrice?.usd ?? data.live_price}
+              t={t}
+            />
           </section>
           <aside className="space-y-4">
             <Card className="shadow-none">
@@ -609,69 +613,121 @@ function wallStatusClass(status: WhaleWall["status"]) {
   if (status === "REJECTED") return "border-emerald-500/50 bg-emerald-500/15 text-emerald-200";
   if (status === "BROKEN") return "border-red-500/50 bg-red-500/15 text-red-200";
   if (status === "REMOVED") return "border-zinc-500/50 bg-zinc-500/15 text-zinc-300";
+  if (status === "DISTANT") return "border-zinc-600/50 bg-zinc-600/10 text-zinc-400";
   return "border-sky-500/40 bg-sky-500/10 text-sky-200";
 }
 
-function WallList({ walls, t }: { walls: WhaleWall[]; t: Dictionary }) {
+function WallRow({
+  wall,
+  t,
+  live,
+}: {
+  wall: WhaleWall;
+  t: Dictionary;
+  live: number;
+}) {
+  const status = wall.status ?? "DISTANT";
+  const hit = wall.hit;
+  const distancePct =
+    live > 0 && wall.price > 0
+      ? (Math.abs(wall.price - live) / live) * 100
+      : null;
+  return (
+    <div
+      className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm ${
+        status === "DISTANT"
+          ? "border-border/50 bg-background/30"
+          : wall.side === "ask"
+            ? "border-red-500/30 bg-red-500/5"
+            : "border-emerald-500/30 bg-emerald-500/5"
+      }`}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-medium">
+            {wall.whale ? t.whaleWall : t.notableWall} ·{" "}
+            {wall.side === "ask" ? t.asks : t.bids}
+          </p>
+          <Badge
+            variant="outline"
+            className={`text-[10px] font-semibold uppercase tracking-wider ${wallStatusClass(status)}`}
+          >
+            {status}
+          </Badge>
+        </div>
+        <p className="font-mono text-xs text-muted-foreground">
+          {formatUsd(wall.priceLow)} – {formatUsd(wall.priceHigh)} ·{" "}
+          {wall.venues.join(", ")}
+        </p>
+        {hit ? (
+          <p className="text-[11px] text-muted-foreground">
+            {interpolate(t.wallHitLine, {
+              time: formatIsoUtc(hit.timestamp),
+              price: formatUsd(hit.price),
+              exchange: hit.exchange,
+              side: hit.side,
+              btc: formatBtc(hit.btc),
+            })}
+          </p>
+        ) : null}
+      </div>
+      <div className="text-right">
+        <p className="font-mono font-semibold">{formatUsd(wall.price)}</p>
+        <p className="text-xs text-muted-foreground">
+          {formatBtc(wall.btc)}
+          {status === "DISTANT" && distancePct !== null
+            ? ` · ${distancePct.toFixed(2)}%`
+            : ""}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function WallList({
+  walls,
+  live,
+  t,
+}: {
+  walls: WhaleWall[];
+  live: number;
+  t: Dictionary;
+}) {
+  const active = walls.filter((wall) => wall.status !== "DISTANT");
+  const distant = walls.filter((wall) => wall.status === "DISTANT");
   return (
     <Card className="shadow-none">
       <CardHeader>
         <CardTitle className="text-sm">{t.wallsTitle}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {walls.length === 0 && (
+        {active.length === 0 && (
           <p className="text-sm text-muted-foreground">{t.wallsEmpty}</p>
         )}
-        {walls.slice(0, 8).map((wall) => {
-          const status = wall.status ?? "APPROACHING";
-          const hit = wall.hit;
-          return (
-            <div
-              key={`${wall.side}-${wall.price}-${status}`}
-              className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm ${
-                wall.side === "ask"
-                  ? "border-red-500/30 bg-red-500/5"
-                  : "border-emerald-500/30 bg-emerald-500/5"
-              }`}
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-medium">
-                    {wall.whale ? t.whaleWall : t.notableWall} ·{" "}
-                    {wall.side === "ask" ? t.asks : t.bids}
-                  </p>
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] font-semibold uppercase tracking-wider ${wallStatusClass(status)}`}
-                  >
-                    {status}
-                  </Badge>
-                </div>
-                <p className="font-mono text-xs text-muted-foreground">
-                  {formatUsd(wall.priceLow)} – {formatUsd(wall.priceHigh)} ·{" "}
-                  {wall.venues.join(", ")}
-                </p>
-                {hit ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    {interpolate(t.wallHitLine, {
-                      time: formatIsoUtc(hit.timestamp),
-                      price: formatUsd(hit.price),
-                      exchange: hit.exchange,
-                      side: hit.side,
-                      btc: formatBtc(hit.btc),
-                    })}
-                  </p>
-                ) : null}
-              </div>
-              <div className="text-right">
-                <p className="font-mono font-semibold">{formatUsd(wall.price)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {formatBtc(wall.btc)}
-                </p>
-              </div>
-            </div>
-          );
-        })}
+        {active.slice(0, 8).map((wall) => (
+          <WallRow
+            key={`${wall.side}-${wall.price}-${wall.status ?? "active"}`}
+            wall={wall}
+            t={t}
+            live={live}
+          />
+        ))}
+        {distant.length > 0 ? (
+          <div className="space-y-2 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t.distantWallsTitle}
+            </p>
+            <p className="text-[11px] text-muted-foreground">{t.distantWallsHint}</p>
+            {distant.slice(0, 6).map((wall) => (
+              <WallRow
+                key={`${wall.side}-${wall.price}-distant`}
+                wall={wall}
+                t={t}
+                live={live}
+              />
+            ))}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

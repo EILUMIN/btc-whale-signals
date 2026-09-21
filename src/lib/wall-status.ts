@@ -7,10 +7,16 @@ import {
 
 export type WallStatus =
   | "APPROACHING"
+  | "DISTANT"
   | "HIT"
   | "REJECTED"
   | "BROKEN"
   | "REMOVED";
+
+/** Nearby only inside this percent of the live snapshot price. */
+export const WALL_APPROACHING_PCT = 1.5;
+/** A wall not seen on the book for this long is stale and REMOVED. */
+export const WALL_STALE_SEC = 120;
 
 export type WallHit = {
   timestamp: string;
@@ -26,9 +32,29 @@ export type WallTrack = {
   status: WallStatus;
   hit: WallHit | null;
   updatedAt: number;
+  lastSeenAt: number;
 };
 
 export const WALL_REMOVED_KEEP_MS = 10 * 60_000;
+
+export function wallDistancePct(wallPrice: number, currentPrice: number): number {
+  if (!(currentPrice > 0) || !(wallPrice > 0)) return Number.POSITIVE_INFINITY;
+  return (Math.abs(wallPrice - currentPrice) / currentPrice) * 100;
+}
+
+export function isDistantWall(wallPrice: number, currentPrice: number): boolean {
+  return wallDistancePct(wallPrice, currentPrice) > WALL_APPROACHING_PCT;
+}
+
+/** APPROACHING only when the wall is on the live book and within 1.5%. */
+export function nearbyOrDistant(
+  wallPrice: number,
+  currentPrice: number,
+  fresh: boolean
+): "APPROACHING" | "DISTANT" {
+  if (!fresh || isDistantWall(wallPrice, currentPrice)) return "DISTANT";
+  return "APPROACHING";
+}
 
 export function wallTrackKey(wall: Pick<WhaleWall, "side" | "price">) {
   const bucket = Math.round(wall.price / WALL_BUCKET_USD) * WALL_BUCKET_USD;
@@ -87,11 +113,16 @@ function transition(
   const key = prev?.key ?? wallTrackKey(view);
   const hit = prev?.hit ?? null;
   const inRange = priceInDisplayedWallRange(live, view);
+  const lastSeenAt = wall ? nowMs : (prev?.lastSeenAt ?? prev?.updatedAt ?? nowMs);
+  const stale =
+    !wall && nowMs - lastSeenAt >= WALL_STALE_SEC * 1000;
 
   if (!wall) {
     let status: WallStatus;
-    if (!prev || prev.status === "APPROACHING") status = "REMOVED";
-    else if (prev.status === "HIT") status = "BROKEN";
+    if (stale) status = "REMOVED";
+    else if (!prev || prev.status === "APPROACHING" || prev.status === "DISTANT") {
+      status = "REMOVED";
+    } else if (prev.status === "HIT") status = "BROKEN";
     else if (prev.status === "REJECTED") status = "REMOVED";
     else status = prev.status;
     return {
@@ -100,6 +131,7 @@ function transition(
       status,
       hit,
       updatedAt: prev && prev.status === status ? prev.updatedAt : nowMs,
+      lastSeenAt,
     };
   }
 
@@ -111,6 +143,7 @@ function transition(
       status: "HIT",
       hit: keepHit,
       updatedAt: nowMs,
+      lastSeenAt,
     };
   }
 
@@ -122,32 +155,46 @@ function transition(
 
   if (hadHit) {
     if (throughWall(live, wall)) {
-      return { key, wall, status: "BROKEN", hit, updatedAt: nowMs };
+      return { key, wall, status: "BROKEN", hit, updatedAt: nowMs, lastSeenAt };
     }
     if (rejectedAway(live, wall) && persists(wall, hit)) {
       if (prev?.status === "BROKEN") {
-        return { key, wall, status: "APPROACHING", hit: null, updatedAt: nowMs };
+        return {
+          key,
+          wall,
+          status: nearbyOrDistant(wall.price, live, true),
+          hit: null,
+          updatedAt: nowMs,
+          lastSeenAt,
+        };
       }
-      return { key, wall, status: "REJECTED", hit, updatedAt: nowMs };
+      return { key, wall, status: "REJECTED", hit, updatedAt: nowMs, lastSeenAt };
     }
     if (rejectedAway(live, wall) && !persists(wall, hit)) {
-      return { key, wall, status: "BROKEN", hit, updatedAt: nowMs };
+      return { key, wall, status: "BROKEN", hit, updatedAt: nowMs, lastSeenAt };
     }
+    const keep = prev?.status;
+    const status: WallStatus =
+      keep === "APPROACHING" || keep === "DISTANT" || !keep
+        ? nearbyOrDistant(wall.price, live, true)
+        : keep;
     return {
       key,
       wall,
-      status: prev?.status ?? "APPROACHING",
+      status,
       hit,
       updatedAt: nowMs,
+      lastSeenAt,
     };
   }
 
   return {
     key,
     wall,
-    status: "APPROACHING",
+    status: nearbyOrDistant(wall.price, live, true),
     hit: null,
     updatedAt: nowMs,
+    lastSeenAt,
   };
 }
 

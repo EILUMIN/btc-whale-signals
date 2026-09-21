@@ -2,6 +2,7 @@
 
 import type { M1Bar, WhaleWall } from "@/lib/m1";
 import { formatUsd } from "@/lib/format";
+import { WALL_APPROACHING_PCT, wallDistancePct } from "@/lib/wall-status";
 
 type Props = {
   bars: M1Bar[];
@@ -45,7 +46,11 @@ export function M1Chart({
   const lows = slice.map((b) => b.low);
   const highs = slice.map((b) => b.high);
   const nearbyWalls = walls.filter(
-    (wall) => live > 0 && Math.abs(wall.price - live) / live <= 0.08
+    (wall) =>
+      wall.status !== "DISTANT" &&
+      wall.status !== "REMOVED" &&
+      live > 0 &&
+      wallDistancePct(wall.price, live) <= WALL_APPROACHING_PCT
   );
   const extras = [
     live,
@@ -65,7 +70,11 @@ export function M1Chart({
     padT + ((yMax - price) / (yMax - yMin)) * plotH;
   const candleW = Math.max(plotW / slice.length - 2, 3);
   const visibleWalls = walls.filter(
-    (wall) => wall.priceHigh >= yMin && wall.priceLow <= yMax
+    (wall) =>
+      wall.status !== "DISTANT" &&
+      wall.status !== "REMOVED" &&
+      wall.priceHigh >= yMin &&
+      wall.priceLow <= yMax
   );
 
   const ticks = 4;
